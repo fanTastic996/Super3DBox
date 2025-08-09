@@ -1,0 +1,393 @@
+camera_head.empty_pose_tokens                                (1, 1, 9)            9
+camera_head.trunk.0.norm1.weight                             (2048,)              2048
+camera_head.trunk.0.norm1.bias                               (2048,)              2048
+camera_head.trunk.0.attn.qkv.weight                          (6144, 2048)         12582912
+camera_head.trunk.0.attn.qkv.bias                            (6144,)              6144
+camera_head.trunk.0.attn.proj.weight                         (2048, 2048)         4194304
+camera_head.trunk.0.attn.proj.bias                           (2048,)              2048
+camera_head.trunk.0.ls1.gamma                                (2048,)              2048
+camera_head.trunk.0.norm2.weight                             (2048,)              2048
+camera_head.trunk.0.norm2.bias                               (2048,)              2048
+camera_head.trunk.0.mlp.fc1.weight                           (8192, 2048)         16777216
+camera_head.trunk.0.mlp.fc1.bias                             (8192,)              8192
+camera_head.trunk.0.mlp.fc2.weight                           (2048, 8192)         16777216
+camera_head.trunk.0.mlp.fc2.bias                             (2048,)              2048
+camera_head.trunk.0.ls2.gamma                                (2048,)              2048
+camera_head.trunk.1.norm1.weight                             (2048,)              2048
+camera_head.trunk.1.norm1.bias                               (2048,)              2048
+camera_head.trunk.1.attn.qkv.weight                          (6144, 2048)         12582912
+camera_head.trunk.1.attn.qkv.bias                            (6144,)              6144
+camera_head.trunk.1.attn.proj.weight                         (2048, 2048)         4194304
+camera_head.trunk.1.attn.proj.bias                           (2048,)              2048
+camera_head.trunk.1.ls1.gamma                                (2048,)              2048
+camera_head.trunk.1.norm2.weight                             (2048,)              2048
+camera_head.trunk.1.norm2.bias                               (2048,)              2048
+camera_head.trunk.1.mlp.fc1.weight                           (8192, 2048)         16777216
+camera_head.trunk.1.mlp.fc1.bias                             (8192,)              8192
+camera_head.trunk.1.mlp.fc2.weight                           (2048, 8192)         16777216
+camera_head.trunk.1.mlp.fc2.bias                             (2048,)              2048
+camera_head.trunk.1.ls2.gamma                                (2048,)              2048
+camera_head.trunk.2.norm1.weight                             (2048,)              2048
+camera_head.trunk.2.norm1.bias                               (2048,)              2048
+camera_head.trunk.2.attn.qkv.weight                          (6144, 2048)         12582912
+camera_head.trunk.2.attn.qkv.bias                            (6144,)              6144
+camera_head.trunk.2.attn.proj.weight                         (2048, 2048)         4194304
+camera_head.trunk.2.attn.proj.bias                           (2048,)              2048
+camera_head.trunk.2.ls1.gamma                                (2048,)              2048
+camera_head.trunk.2.norm2.weight                             (2048,)              2048
+camera_head.trunk.2.norm2.bias                               (2048,)              2048
+camera_head.trunk.2.mlp.fc1.weight                           (8192, 2048)         16777216
+camera_head.trunk.2.mlp.fc1.bias                             (8192,)              8192
+camera_head.trunk.2.mlp.fc2.weight                           (2048, 8192)         16777216
+camera_head.trunk.2.mlp.fc2.bias                             (2048,)              2048
+camera_head.trunk.2.ls2.gamma                                (2048,)              2048
+camera_head.trunk.3.norm1.weight                             (2048,)              2048
+camera_head.trunk.3.norm1.bias                               (2048,)              2048
+camera_head.trunk.3.attn.qkv.weight                          (6144, 2048)         12582912
+camera_head.trunk.3.attn.qkv.bias                            (6144,)              6144
+camera_head.trunk.3.attn.proj.weight                         (2048, 2048)         4194304
+camera_head.trunk.3.attn.proj.bias                           (2048,)              2048
+camera_head.trunk.3.ls1.gamma                                (2048,)              2048
+camera_head.trunk.3.norm2.weight                             (2048,)              2048
+camera_head.trunk.3.norm2.bias                               (2048,)              2048
+camera_head.trunk.3.mlp.fc1.weight                           (8192, 2048)         16777216
+camera_head.trunk.3.mlp.fc1.bias                             (8192,)              8192
+camera_head.trunk.3.mlp.fc2.weight                           (2048, 8192)         16777216
+camera_head.trunk.3.mlp.fc2.bias                             (2048,)              2048
+camera_head.trunk.3.ls2.gamma                                (2048,)              2048
+camera_head.token_norm.weight                                (2048,)              2048
+camera_head.token_norm.bias                                  (2048,)              2048
+camera_head.trunk_norm.weight                                (2048,)              2048
+camera_head.trunk_norm.bias                                  (2048,)              2048
+camera_head.embed_pose.weight                                (2048, 9)            18432
+camera_head.embed_pose.bias                                  (2048,)              2048
+camera_head.poseLN_modulation.1.weight                       (6144, 2048)         12582912
+camera_head.poseLN_modulation.1.bias                         (6144,)              6144
+camera_head.pose_branch.fc1.weight                           (1024, 2048)         2097152
+camera_head.pose_branch.fc1.bias                             (1024,)              1024
+camera_head.pose_branch.fc2.weight                           (9, 1024)            9216
+camera_head.pose_branch.fc2.bias                             (9,)                 9
+box_head.level_embed                                         (1, 256)             256
+box_head.prompting.prompters.0.query_embed.weight            (2, 256)             512
+box_head.prompting.prompters.0.encoders.box_2d_encoder.x.weight (1280, 64)           81920
+box_head.prompting.prompters.0.encoders.box_2d_encoder.y.weight (1280, 64)           81920
+box_head.prompting.prompters.0.encoders.box_2d_encoder.w.weight (1280, 64)           81920
+box_head.prompting.prompters.0.encoders.box_2d_encoder.h.weight (1280, 64)           81920
+box_head.prompting.prompters.1.predictors.0.linear.weight    (2, 256)             512
+box_head.prompting.prompters.1.predictors.0.linear.bias      (2,)                 2
+box_head.prompting.prompters.1.predictors.1.mlp.layers.0.weight (256, 256)           65536
+box_head.prompting.prompters.1.predictors.1.mlp.layers.0.bias (256,)               256
+box_head.prompting.prompters.1.predictors.1.mlp.layers.1.weight (256, 256)           65536
+box_head.prompting.prompters.1.predictors.1.mlp.layers.1.bias (256,)               256
+box_head.prompting.prompters.1.predictors.1.mlp.layers.2.weight (4, 256)             1024
+box_head.prompting.prompters.1.predictors.1.mlp.layers.2.bias (4,)                 4
+box_head.prompting.prompters.1.query_embed.weight            (1200, 256)          307200
+box_head.prompting.prompters.1.enc_output_proj.1.0.weight    (256, 256, 2, 2)     262144
+box_head.prompting.prompters.1.enc_output_proj.1.0.bias      (256,)               256
+box_head.prompting.prompters.1.enc_output_proj.2.0.weight    (256, 256, 2, 2)     262144
+box_head.prompting.prompters.1.enc_output_proj.2.0.bias      (256,)               256
+box_head.prompting.prompters.1.enc_output_proj.2.1.ln.weight (256,)               256
+box_head.prompting.prompters.1.enc_output_proj.2.1.ln.bias   (256,)               256
+box_head.prompting.prompters.1.enc_output_proj.2.3.weight    (256, 256, 2, 2)     262144
+box_head.prompting.prompters.1.enc_output_proj.2.3.bias      (256,)               256
+box_head.prompting.prompters.1.enc_output.weight             (256, 256)           65536
+box_head.prompting.prompters.1.enc_output.bias               (256,)               256
+box_head.prompting.prompters.1.enc_output_norm.weight        (256,)               256
+box_head.prompting.prompters.1.enc_output_norm.bias          (256,)               256
+box_head.decoder.layers.0.xattn.cpb_mlp1.0.weight            (512, 2)             1024
+box_head.decoder.layers.0.xattn.cpb_mlp1.0.bias              (512,)               512
+box_head.decoder.layers.0.xattn.cpb_mlp1.2.weight            (8, 512)             4096
+box_head.decoder.layers.0.xattn.cpb_mlp2.0.weight            (512, 2)             1024
+box_head.decoder.layers.0.xattn.cpb_mlp2.0.bias              (512,)               512
+box_head.decoder.layers.0.xattn.cpb_mlp2.2.weight            (8, 512)             4096
+box_head.decoder.layers.0.xattn.q.weight                     (256, 256)           65536
+box_head.decoder.layers.0.xattn.q.bias                       (256,)               256
+box_head.decoder.layers.0.xattn.k.weight                     (256, 256)           65536
+box_head.decoder.layers.0.xattn.k.bias                       (256,)               256
+box_head.decoder.layers.0.xattn.v.weight                     (256, 256)           65536
+box_head.decoder.layers.0.xattn.v.bias                       (256,)               256
+box_head.decoder.layers.0.xattn.proj.weight                  (256, 256)           65536
+box_head.decoder.layers.0.xattn.proj.bias                    (256,)               256
+box_head.decoder.layers.0.norm1.weight                       (256,)               256
+box_head.decoder.layers.0.norm1.bias                         (256,)               256
+box_head.decoder.layers.0.self_attn.in_proj_weight           (768, 256)           196608
+box_head.decoder.layers.0.self_attn.in_proj_bias             (768,)               768
+box_head.decoder.layers.0.self_attn.out_proj.weight          (256, 256)           65536
+box_head.decoder.layers.0.self_attn.out_proj.bias            (256,)               256
+box_head.decoder.layers.0.norm2.weight                       (256,)               256
+box_head.decoder.layers.0.norm2.bias                         (256,)               256
+box_head.decoder.layers.0.linear1.weight                     (2048, 256)          524288
+box_head.decoder.layers.0.linear1.bias                       (2048,)              2048
+box_head.decoder.layers.0.linear2.weight                     (256, 2048)          524288
+box_head.decoder.layers.0.linear2.bias                       (256,)               256
+box_head.decoder.layers.0.norm3.weight                       (256,)               256
+box_head.decoder.layers.0.norm3.bias                         (256,)               256
+box_head.decoder.layers.1.xattn.cpb_mlp1.0.weight            (512, 2)             1024
+box_head.decoder.layers.1.xattn.cpb_mlp1.0.bias              (512,)               512
+box_head.decoder.layers.1.xattn.cpb_mlp1.2.weight            (8, 512)             4096
+box_head.decoder.layers.1.xattn.cpb_mlp2.0.weight            (512, 2)             1024
+box_head.decoder.layers.1.xattn.cpb_mlp2.0.bias              (512,)               512
+box_head.decoder.layers.1.xattn.cpb_mlp2.2.weight            (8, 512)             4096
+box_head.decoder.layers.1.xattn.q.weight                     (256, 256)           65536
+box_head.decoder.layers.1.xattn.q.bias                       (256,)               256
+box_head.decoder.layers.1.xattn.k.weight                     (256, 256)           65536
+box_head.decoder.layers.1.xattn.k.bias                       (256,)               256
+box_head.decoder.layers.1.xattn.v.weight                     (256, 256)           65536
+box_head.decoder.layers.1.xattn.v.bias                       (256,)               256
+box_head.decoder.layers.1.xattn.proj.weight                  (256, 256)           65536
+box_head.decoder.layers.1.xattn.proj.bias                    (256,)               256
+box_head.decoder.layers.1.norm1.weight                       (256,)               256
+box_head.decoder.layers.1.norm1.bias                         (256,)               256
+box_head.decoder.layers.1.self_attn.in_proj_weight           (768, 256)           196608
+box_head.decoder.layers.1.self_attn.in_proj_bias             (768,)               768
+box_head.decoder.layers.1.self_attn.out_proj.weight          (256, 256)           65536
+box_head.decoder.layers.1.self_attn.out_proj.bias            (256,)               256
+box_head.decoder.layers.1.norm2.weight                       (256,)               256
+box_head.decoder.layers.1.norm2.bias                         (256,)               256
+box_head.decoder.layers.1.linear1.weight                     (2048, 256)          524288
+box_head.decoder.layers.1.linear1.bias                       (2048,)              2048
+box_head.decoder.layers.1.linear2.weight                     (256, 2048)          524288
+box_head.decoder.layers.1.linear2.bias                       (256,)               256
+box_head.decoder.layers.1.norm3.weight                       (256,)               256
+box_head.decoder.layers.1.norm3.bias                         (256,)               256
+box_head.decoder.layers.2.xattn.cpb_mlp1.0.weight            (512, 2)             1024
+box_head.decoder.layers.2.xattn.cpb_mlp1.0.bias              (512,)               512
+box_head.decoder.layers.2.xattn.cpb_mlp1.2.weight            (8, 512)             4096
+box_head.decoder.layers.2.xattn.cpb_mlp2.0.weight            (512, 2)             1024
+box_head.decoder.layers.2.xattn.cpb_mlp2.0.bias              (512,)               512
+box_head.decoder.layers.2.xattn.cpb_mlp2.2.weight            (8, 512)             4096
+box_head.decoder.layers.2.xattn.q.weight                     (256, 256)           65536
+box_head.decoder.layers.2.xattn.q.bias                       (256,)               256
+box_head.decoder.layers.2.xattn.k.weight                     (256, 256)           65536
+box_head.decoder.layers.2.xattn.k.bias                       (256,)               256
+box_head.decoder.layers.2.xattn.v.weight                     (256, 256)           65536
+box_head.decoder.layers.2.xattn.v.bias                       (256,)               256
+box_head.decoder.layers.2.xattn.proj.weight                  (256, 256)           65536
+box_head.decoder.layers.2.xattn.proj.bias                    (256,)               256
+box_head.decoder.layers.2.norm1.weight                       (256,)               256
+box_head.decoder.layers.2.norm1.bias                         (256,)               256
+box_head.decoder.layers.2.self_attn.in_proj_weight           (768, 256)           196608
+box_head.decoder.layers.2.self_attn.in_proj_bias             (768,)               768
+box_head.decoder.layers.2.self_attn.out_proj.weight          (256, 256)           65536
+box_head.decoder.layers.2.self_attn.out_proj.bias            (256,)               256
+box_head.decoder.layers.2.norm2.weight                       (256,)               256
+box_head.decoder.layers.2.norm2.bias                         (256,)               256
+box_head.decoder.layers.2.linear1.weight                     (2048, 256)          524288
+box_head.decoder.layers.2.linear1.bias                       (2048,)              2048
+box_head.decoder.layers.2.linear2.weight                     (256, 2048)          524288
+box_head.decoder.layers.2.linear2.bias                       (256,)               256
+box_head.decoder.layers.2.norm3.weight                       (256,)               256
+box_head.decoder.layers.2.norm3.bias                         (256,)               256
+box_head.decoder.layers.3.xattn.cpb_mlp1.0.weight            (512, 2)             1024
+box_head.decoder.layers.3.xattn.cpb_mlp1.0.bias              (512,)               512
+box_head.decoder.layers.3.xattn.cpb_mlp1.2.weight            (8, 512)             4096
+box_head.decoder.layers.3.xattn.cpb_mlp2.0.weight            (512, 2)             1024
+box_head.decoder.layers.3.xattn.cpb_mlp2.0.bias              (512,)               512
+box_head.decoder.layers.3.xattn.cpb_mlp2.2.weight            (8, 512)             4096
+box_head.decoder.layers.3.xattn.q.weight                     (256, 256)           65536
+box_head.decoder.layers.3.xattn.q.bias                       (256,)               256
+box_head.decoder.layers.3.xattn.k.weight                     (256, 256)           65536
+box_head.decoder.layers.3.xattn.k.bias                       (256,)               256
+box_head.decoder.layers.3.xattn.v.weight                     (256, 256)           65536
+box_head.decoder.layers.3.xattn.v.bias                       (256,)               256
+box_head.decoder.layers.3.xattn.proj.weight                  (256, 256)           65536
+box_head.decoder.layers.3.xattn.proj.bias                    (256,)               256
+box_head.decoder.layers.3.norm1.weight                       (256,)               256
+box_head.decoder.layers.3.norm1.bias                         (256,)               256
+box_head.decoder.layers.3.self_attn.in_proj_weight           (768, 256)           196608
+box_head.decoder.layers.3.self_attn.in_proj_bias             (768,)               768
+box_head.decoder.layers.3.self_attn.out_proj.weight          (256, 256)           65536
+box_head.decoder.layers.3.self_attn.out_proj.bias            (256,)               256
+box_head.decoder.layers.3.norm2.weight                       (256,)               256
+box_head.decoder.layers.3.norm2.bias                         (256,)               256
+box_head.decoder.layers.3.linear1.weight                     (2048, 256)          524288
+box_head.decoder.layers.3.linear1.bias                       (2048,)              2048
+box_head.decoder.layers.3.linear2.weight                     (256, 2048)          524288
+box_head.decoder.layers.3.linear2.bias                       (256,)               256
+box_head.decoder.layers.3.norm3.weight                       (256,)               256
+box_head.decoder.layers.3.norm3.bias                         (256,)               256
+box_head.decoder.layers.4.xattn.cpb_mlp1.0.weight            (512, 2)             1024
+box_head.decoder.layers.4.xattn.cpb_mlp1.0.bias              (512,)               512
+box_head.decoder.layers.4.xattn.cpb_mlp1.2.weight            (8, 512)             4096
+box_head.decoder.layers.4.xattn.cpb_mlp2.0.weight            (512, 2)             1024
+box_head.decoder.layers.4.xattn.cpb_mlp2.0.bias              (512,)               512
+box_head.decoder.layers.4.xattn.cpb_mlp2.2.weight            (8, 512)             4096
+box_head.decoder.layers.4.xattn.q.weight                     (256, 256)           65536
+box_head.decoder.layers.4.xattn.q.bias                       (256,)               256
+box_head.decoder.layers.4.xattn.k.weight                     (256, 256)           65536
+box_head.decoder.layers.4.xattn.k.bias                       (256,)               256
+box_head.decoder.layers.4.xattn.v.weight                     (256, 256)           65536
+box_head.decoder.layers.4.xattn.v.bias                       (256,)               256
+box_head.decoder.layers.4.xattn.proj.weight                  (256, 256)           65536
+box_head.decoder.layers.4.xattn.proj.bias                    (256,)               256
+box_head.decoder.layers.4.norm1.weight                       (256,)               256
+box_head.decoder.layers.4.norm1.bias                         (256,)               256
+box_head.decoder.layers.4.self_attn.in_proj_weight           (768, 256)           196608
+box_head.decoder.layers.4.self_attn.in_proj_bias             (768,)               768
+box_head.decoder.layers.4.self_attn.out_proj.weight          (256, 256)           65536
+box_head.decoder.layers.4.self_attn.out_proj.bias            (256,)               256
+box_head.decoder.layers.4.norm2.weight                       (256,)               256
+box_head.decoder.layers.4.norm2.bias                         (256,)               256
+box_head.decoder.layers.4.linear1.weight                     (2048, 256)          524288
+box_head.decoder.layers.4.linear1.bias                       (2048,)              2048
+box_head.decoder.layers.4.linear2.weight                     (256, 2048)          524288
+box_head.decoder.layers.4.linear2.bias                       (256,)               256
+box_head.decoder.layers.4.norm3.weight                       (256,)               256
+box_head.decoder.layers.4.norm3.bias                         (256,)               256
+box_head.decoder.layers.5.xattn.cpb_mlp1.0.weight            (512, 2)             1024
+box_head.decoder.layers.5.xattn.cpb_mlp1.0.bias              (512,)               512
+box_head.decoder.layers.5.xattn.cpb_mlp1.2.weight            (8, 512)             4096
+box_head.decoder.layers.5.xattn.cpb_mlp2.0.weight            (512, 2)             1024
+box_head.decoder.layers.5.xattn.cpb_mlp2.0.bias              (512,)               512
+box_head.decoder.layers.5.xattn.cpb_mlp2.2.weight            (8, 512)             4096
+box_head.decoder.layers.5.xattn.q.weight                     (256, 256)           65536
+box_head.decoder.layers.5.xattn.q.bias                       (256,)               256
+box_head.decoder.layers.5.xattn.k.weight                     (256, 256)           65536
+box_head.decoder.layers.5.xattn.k.bias                       (256,)               256
+box_head.decoder.layers.5.xattn.v.weight                     (256, 256)           65536
+box_head.decoder.layers.5.xattn.v.bias                       (256,)               256
+box_head.decoder.layers.5.xattn.proj.weight                  (256, 256)           65536
+box_head.decoder.layers.5.xattn.proj.bias                    (256,)               256
+box_head.decoder.layers.5.norm1.weight                       (256,)               256
+box_head.decoder.layers.5.norm1.bias                         (256,)               256
+box_head.decoder.layers.5.self_attn.in_proj_weight           (768, 256)           196608
+box_head.decoder.layers.5.self_attn.in_proj_bias             (768,)               768
+box_head.decoder.layers.5.self_attn.out_proj.weight          (256, 256)           65536
+box_head.decoder.layers.5.self_attn.out_proj.bias            (256,)               256
+box_head.decoder.layers.5.norm2.weight                       (256,)               256
+box_head.decoder.layers.5.norm2.bias                         (256,)               256
+box_head.decoder.layers.5.linear1.weight                     (2048, 256)          524288
+box_head.decoder.layers.5.linear1.bias                       (2048,)              2048
+box_head.decoder.layers.5.linear2.weight                     (256, 2048)          524288
+box_head.decoder.layers.5.linear2.bias                       (256,)               256
+box_head.decoder.layers.5.norm3.weight                       (256,)               256
+box_head.decoder.layers.5.norm3.bias                         (256,)               256
+box_head.decoder.predictors.0.0.shift.weight                 (1, 256)             256
+box_head.decoder.predictors.0.0.shift.bias                   (1,)                 1
+box_head.decoder.predictors.0.0.scale.weight                 (1, 256)             256
+box_head.decoder.predictors.0.0.scale.bias                   (1,)                 1
+box_head.decoder.predictors.0.1.linear.weight                (2, 256)             512
+box_head.decoder.predictors.0.1.linear.bias                  (2,)                 2
+box_head.decoder.predictors.0.2.mlp.layers.0.weight          (256, 256)           65536
+box_head.decoder.predictors.0.2.mlp.layers.0.bias            (256,)               256
+box_head.decoder.predictors.0.2.mlp.layers.1.weight          (256, 256)           65536
+box_head.decoder.predictors.0.2.mlp.layers.1.bias            (256,)               256
+box_head.decoder.predictors.0.2.mlp.layers.2.weight          (4, 256)             1024
+box_head.decoder.predictors.0.2.mlp.layers.2.bias            (4,)                 4
+box_head.decoder.predictors.0.3.mlp.layers.0.weight          (256, 256)           65536
+box_head.decoder.predictors.0.3.mlp.layers.0.bias            (256,)               256
+box_head.decoder.predictors.0.3.mlp.layers.1.weight          (256, 256)           65536
+box_head.decoder.predictors.0.3.mlp.layers.1.bias            (256,)               256
+box_head.decoder.predictors.0.3.mlp.layers.2.weight          (7, 256)             1792
+box_head.decoder.predictors.0.3.mlp.layers.2.bias            (7,)                 7
+box_head.decoder.predictors.1.0.shift.weight                 (1, 256)             256
+box_head.decoder.predictors.1.0.shift.bias                   (1,)                 1
+box_head.decoder.predictors.1.0.scale.weight                 (1, 256)             256
+box_head.decoder.predictors.1.0.scale.bias                   (1,)                 1
+box_head.decoder.predictors.1.1.linear.weight                (2, 256)             512
+box_head.decoder.predictors.1.1.linear.bias                  (2,)                 2
+box_head.decoder.predictors.1.2.mlp.layers.0.weight          (256, 256)           65536
+box_head.decoder.predictors.1.2.mlp.layers.0.bias            (256,)               256
+box_head.decoder.predictors.1.2.mlp.layers.1.weight          (256, 256)           65536
+box_head.decoder.predictors.1.2.mlp.layers.1.bias            (256,)               256
+box_head.decoder.predictors.1.2.mlp.layers.2.weight          (4, 256)             1024
+box_head.decoder.predictors.1.2.mlp.layers.2.bias            (4,)                 4
+box_head.decoder.predictors.1.3.mlp.layers.0.weight          (256, 256)           65536
+box_head.decoder.predictors.1.3.mlp.layers.0.bias            (256,)               256
+box_head.decoder.predictors.1.3.mlp.layers.1.weight          (256, 256)           65536
+box_head.decoder.predictors.1.3.mlp.layers.1.bias            (256,)               256
+box_head.decoder.predictors.1.3.mlp.layers.2.weight          (7, 256)             1792
+box_head.decoder.predictors.1.3.mlp.layers.2.bias            (7,)                 7
+box_head.decoder.predictors.2.0.shift.weight                 (1, 256)             256
+box_head.decoder.predictors.2.0.shift.bias                   (1,)                 1
+box_head.decoder.predictors.2.0.scale.weight                 (1, 256)             256
+box_head.decoder.predictors.2.0.scale.bias                   (1,)                 1
+box_head.decoder.predictors.2.1.linear.weight                (2, 256)             512
+box_head.decoder.predictors.2.1.linear.bias                  (2,)                 2
+box_head.decoder.predictors.2.2.mlp.layers.0.weight          (256, 256)           65536
+box_head.decoder.predictors.2.2.mlp.layers.0.bias            (256,)               256
+box_head.decoder.predictors.2.2.mlp.layers.1.weight          (256, 256)           65536
+box_head.decoder.predictors.2.2.mlp.layers.1.bias            (256,)               256
+box_head.decoder.predictors.2.2.mlp.layers.2.weight          (4, 256)             1024
+box_head.decoder.predictors.2.2.mlp.layers.2.bias            (4,)                 4
+box_head.decoder.predictors.2.3.mlp.layers.0.weight          (256, 256)           65536
+box_head.decoder.predictors.2.3.mlp.layers.0.bias            (256,)               256
+box_head.decoder.predictors.2.3.mlp.layers.1.weight          (256, 256)           65536
+box_head.decoder.predictors.2.3.mlp.layers.1.bias            (256,)               256
+box_head.decoder.predictors.2.3.mlp.layers.2.weight          (7, 256)             1792
+box_head.decoder.predictors.2.3.mlp.layers.2.bias            (7,)                 7
+box_head.decoder.predictors.3.0.shift.weight                 (1, 256)             256
+box_head.decoder.predictors.3.0.shift.bias                   (1,)                 1
+box_head.decoder.predictors.3.0.scale.weight                 (1, 256)             256
+box_head.decoder.predictors.3.0.scale.bias                   (1,)                 1
+box_head.decoder.predictors.3.1.linear.weight                (2, 256)             512
+box_head.decoder.predictors.3.1.linear.bias                  (2,)                 2
+box_head.decoder.predictors.3.2.mlp.layers.0.weight          (256, 256)           65536
+box_head.decoder.predictors.3.2.mlp.layers.0.bias            (256,)               256
+box_head.decoder.predictors.3.2.mlp.layers.1.weight          (256, 256)           65536
+box_head.decoder.predictors.3.2.mlp.layers.1.bias            (256,)               256
+box_head.decoder.predictors.3.2.mlp.layers.2.weight          (4, 256)             1024
+box_head.decoder.predictors.3.2.mlp.layers.2.bias            (4,)                 4
+box_head.decoder.predictors.3.3.mlp.layers.0.weight          (256, 256)           65536
+box_head.decoder.predictors.3.3.mlp.layers.0.bias            (256,)               256
+box_head.decoder.predictors.3.3.mlp.layers.1.weight          (256, 256)           65536
+box_head.decoder.predictors.3.3.mlp.layers.1.bias            (256,)               256
+box_head.decoder.predictors.3.3.mlp.layers.2.weight          (7, 256)             1792
+box_head.decoder.predictors.3.3.mlp.layers.2.bias            (7,)                 7
+box_head.decoder.predictors.4.0.shift.weight                 (1, 256)             256
+box_head.decoder.predictors.4.0.shift.bias                   (1,)                 1
+box_head.decoder.predictors.4.0.scale.weight                 (1, 256)             256
+box_head.decoder.predictors.4.0.scale.bias                   (1,)                 1
+box_head.decoder.predictors.4.1.linear.weight                (2, 256)             512
+box_head.decoder.predictors.4.1.linear.bias                  (2,)                 2
+box_head.decoder.predictors.4.2.mlp.layers.0.weight          (256, 256)           65536
+box_head.decoder.predictors.4.2.mlp.layers.0.bias            (256,)               256
+box_head.decoder.predictors.4.2.mlp.layers.1.weight          (256, 256)           65536
+box_head.decoder.predictors.4.2.mlp.layers.1.bias            (256,)               256
+box_head.decoder.predictors.4.2.mlp.layers.2.weight          (4, 256)             1024
+box_head.decoder.predictors.4.2.mlp.layers.2.bias            (4,)                 4
+box_head.decoder.predictors.4.3.mlp.layers.0.weight          (256, 256)           65536
+box_head.decoder.predictors.4.3.mlp.layers.0.bias            (256,)               256
+box_head.decoder.predictors.4.3.mlp.layers.1.weight          (256, 256)           65536
+box_head.decoder.predictors.4.3.mlp.layers.1.bias            (256,)               256
+box_head.decoder.predictors.4.3.mlp.layers.2.weight          (7, 256)             1792
+box_head.decoder.predictors.4.3.mlp.layers.2.bias            (7,)                 7
+box_head.decoder.predictors.5.0.shift.weight                 (1, 256)             256
+box_head.decoder.predictors.5.0.shift.bias                   (1,)                 1
+box_head.decoder.predictors.5.0.scale.weight                 (1, 256)             256
+box_head.decoder.predictors.5.0.scale.bias                   (1,)                 1
+box_head.decoder.predictors.5.1.linear.weight                (2, 256)             512
+box_head.decoder.predictors.5.1.linear.bias                  (2,)                 2
+box_head.decoder.predictors.5.2.mlp.layers.0.weight          (256, 256)           65536
+box_head.decoder.predictors.5.2.mlp.layers.0.bias            (256,)               256
+box_head.decoder.predictors.5.2.mlp.layers.1.weight          (256, 256)           65536
+box_head.decoder.predictors.5.2.mlp.layers.1.bias            (256,)               256
+box_head.decoder.predictors.5.2.mlp.layers.2.weight          (4, 256)             1024
+box_head.decoder.predictors.5.2.mlp.layers.2.bias            (4,)                 4
+box_head.decoder.predictors.5.3.mlp.layers.0.weight          (256, 256)           65536
+box_head.decoder.predictors.5.3.mlp.layers.0.bias            (256,)               256
+box_head.decoder.predictors.5.3.mlp.layers.1.weight          (256, 256)           65536
+box_head.decoder.predictors.5.3.mlp.layers.1.bias            (256,)               256
+box_head.decoder.predictors.5.3.mlp.layers.2.weight          (7, 256)             1792
+box_head.decoder.predictors.5.3.mlp.layers.2.bias            (7,)                 7
+box_head.decoder.norm.weight                                 (256,)               256
+box_head.decoder.norm.bias                                   (256,)               256
+box_head.pos_embedding.proj.weight                           (256, 255)           65280
+box_head.pos_embedding.proj.bias                             (256,)               256
+box_head.fusion_module.proj_b.weight                         (256, 2048)          524288
+box_head.fusion_module.proj_b.bias                           (256,)               256
+box_head.fusion_module.multihead_attn.in_proj_weight         (768, 256)           196608
+box_head.fusion_module.multihead_attn.in_proj_bias           (768,)               768
+box_head.fusion_module.multihead_attn.out_proj.weight        (256, 256)           65536
+box_head.fusion_module.multihead_attn.out_proj.bias          (256,)               256
+box_head.fusion_module.layer_norm.weight                     (256,)               256
+box_head.fusion_module.layer_norm.bias                       (256,)               256
+box_head.vggt_merger.ln_q.weight                             (2048,)              2048
+box_head.vggt_merger.mlp.0.weight                            (4096, 8192)         33554432
+box_head.vggt_merger.mlp.0.bias                              (4096,)              4096
+box_head.vggt_merger.mlp.2.weight                            (2048, 4096)         8388608
+box_head.vggt_merger.mlp.2.bias                              (2048,)              2048
+box_head.input_proj.0.0.weight                               (256, 768, 1, 1)     196608
+box_head.input_proj.0.0.bias                                 (256,)               256
+box_head.input_proj.0.1.weight                               (256,)               256
+box_head.input_proj.0.1.bias                                 (256,)               256
