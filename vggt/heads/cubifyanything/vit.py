@@ -490,7 +490,8 @@ class ViT(nn.Module):
         return next(iter(self._out_feature_strides.values()))
 
     def forward(self, s: BatchedPosedSensor):
-        x = s[self.image_name].data.tensor #'image'
+        x = s[self.image_name].data.tensor #image_name: 'image'  'depth_name': 
+        # print('self.image_name',self.image_name,self.depth_name)
         image_shape = (x.shape[2], x.shape[3])
         x = self.patch_embed(x)
         if self.pos_embed is not None:

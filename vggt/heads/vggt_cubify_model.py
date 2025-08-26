@@ -939,7 +939,7 @@ class EncoderProposals(Prompter):
 
     def get_proposals(self, memory, mask_flatten, spatial_shapes, sensor):
         output_memory, box_proposals = self.gen_encoder_output_proposals(
-            memory, mask_flatten, spatial_shapes, sensor)
+            memory, mask_flatten, spatial_shapes, sensor) #sensor无影响
 
         encoder_proposals = [Instances3D(image_size) for image_size in sensor["image"].data.image_sizes]
         for encoder_proposals_, box_proposals_ in zip(encoder_proposals, box_proposals):
@@ -1407,7 +1407,7 @@ class FeatureFusionModule_v2(nn.Module):
         attn_output, _ = self.multihead_attn(
             query=A, # [N, 1024, 256]
             key=B_proj, # [N, 306, 256]
-            value=B_proj
+            value=B_proj # [N, 306, 256]
         )
         
         # 3. 残差连接 + 层归一化（保留原始A的信息）

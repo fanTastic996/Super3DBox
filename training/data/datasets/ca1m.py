@@ -148,9 +148,11 @@ class CA1MDataset(BaseDataset):
             seq_name = self.sequence_list[seq_index]
         # 如果没有提供特定ID，则随机选择图像
         if ids is None:
-            ids = np.random.choice(
-                self.data_store[seq_name], img_per_seq, replace=self.allow_duplicate_img
-            )
+            # ids = np.random.choice(
+            #     self.data_store[seq_name], img_per_seq, replace=self.allow_duplicate_img
+            # )
+            ids = np.array([180,200])
+            
         image_idxs = ids  # 获取图像ID
 
         # print("Seq", seq_name,'ids', ids) 
@@ -185,8 +187,7 @@ class CA1MDataset(BaseDataset):
         
         seq_poses = scene_data['poses'].reshape(-1, 4, 4)  # 获取序列位姿
         K_rgb = scene_data['K_rgb']
-        
-        
+         
         for img_idx in image_idxs:
             
             filepath = osp.join(seq_name,'rgb',str(img_idx)+'.png') 
@@ -221,8 +222,14 @@ class CA1MDataset(BaseDataset):
             cur_pose = seq_poses[img_idx] # [4,4]
             extri_opencv = cur_pose[:3,:] #np.array(anno["extri"])
             intri_opencv = K_rgb #np.array(anno["intri"])
-            # 处理单张图像
-            
+            # # 处理单张图像
+            # print(filepath,"image", image.shape)
+            # print(filepath,"depth_map",depth_map.shape)
+            # print(filepath,"extri_opencv",extri_opencv.shape)
+            # print(filepath,"intri_opencv",intri_opencv)
+            # print(filepath,"original_size",original_size)
+            # print(filepath,"target_image_shape",target_image_shape)
+            # print(filepath,"aspect_ratio",aspect_ratio)
             (
                 image,
                 depth_map,
@@ -241,8 +248,12 @@ class CA1MDataset(BaseDataset):
                 target_image_shape,
                 filepath=filepath,
             )
+            # print(filepath,"image", image.shape)
+            # print(filepath,"depth_map",depth_map.shape)
+            # print(filepath,"extri_opencv",extri_opencv.shape)
+            # print(filepath,"intri_opencv",intri_opencv)
             # 添加处理后的数据到列表
-            images.append(image) # np
+            images.append(image) 
             depths.append(depth_map)
             extrinsics.append(extri_opencv) # [3,4]
             intrinsics.append(intri_opencv) # [3,3]
@@ -252,6 +263,7 @@ class CA1MDataset(BaseDataset):
             image_paths.append(image_path) # [H,W]
             original_sizes.append(original_size)
         # print("len images", len(images))
+        # exit(0)
         # 数据集名称
         set_name = "CA1M"
         # 构建并返回批次数据

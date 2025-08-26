@@ -10,24 +10,21 @@ import matplotlib.colors as mcolors
 import open3d as o3d
 import json
 from scipy.spatial import KDTree
-from .utils import *
-
-
-
-
-
-
+from utils import *
+import torch
+import pickle
 
 
 def visualize_with_rerun(
     depth_maps: list,          # 深度图列表 (H x W)
     color_images: list,        # RGB图像列表 (H x W x 3)
-    intrinsic: np.ndarray,     # 相机内参 (3x3)
-    poses: list,               # 世界→相机的位姿 (4x4 矩阵)
+    intrinsics: np.ndarray,     # 相机内参 (3x3)
+    poses: np.ndarray,               # 世界→相机的位姿 (4x4 矩阵)
     depth_scale: float = 1.0,   # 深度值缩放因子
     json_path: str = None,  # 可选的 JSON 文件路径，用于加载边界框数据
     scene_path: str = None,  # 场景数据路径，用于加载GT点云和相机参数
-    image_idxs: list = None  # 可选的图像索引列表，用于过滤可视化的边界框
+    image_idxs: list = None,  # 可选的图像索引列表，用于过滤可视化的边界框
+    predictions: dict = None  # 可选的预测结果字典，用于可视化预测边界框
 ):
     # 初始化Rerun
     rr.init("pointcloud_and_cameras", spawn=True)
@@ -37,6 +34,11 @@ def visualize_with_rerun(
     colors_all = []  # 用于存储所有颜色数据
     for frame_idx, (depth, color, T_wc) in enumerate(zip(depth_maps, color_images, poses)):
         frameid = image_idxs[frame_idx]
+        intrinsic = intrinsics[frame_idx]
+        print('depth.shape', depth.shape)
+        print('color.shape', color.shape)
+        print('T_wc', T_wc.shape)
+        print('intrinsic', intrinsic.shape)
         # --- 点云生成与记录 ---
         points, colors = depth_to_pointcloud(depth, color, intrinsic, T_wc, depth_scale)
         points_all.append(points)
@@ -70,19 +72,14 @@ def visualize_with_rerun(
             rr.Points3D(points_all, colors=colors_all, radii=0.005)  # 控制点云半径
         )
     
-    #TODO:filter visiable bboxes
-    scene_data = load_scene_data(scene_path)
-    
-    filtered_bbox_corners, mask = filter_gt_boxes_for_images(scene_data, image_idxs, points_all)
-    
     #visualize the bbox
-    visualize_bboxes_from_json(json_path, mask)
+    visualize_bboxes_from_pred(predictions)
 
 
     
 if __name__ == "__main__":
     
-    #python vis_datasets.py --scene_id 42897951 --frame_ids 799,341
+    #python demo_vis_offline.py --scene_id 43649409 --frame_ids 478,546  --pred /home/lyq/myprojects/vggt_new/vggt/vis_results/43649409_pred.pkl
     
     # 创建命令行参数解析器
     parser = argparse.ArgumentParser(description="点云与相机位姿可视化")
@@ -92,27 +89,44 @@ if __name__ == "__main__":
                         help="图像ID列表，逗号分隔 (例如:0,100,200)")
     parser.add_argument("--data_root", type=str, default="/media/lyq/temp/dataset/train-CA-1M-slam", 
                         help="数据集根目录")
+    parser.add_argument("--pred", type=str, default=None, 
+                        help="预测结果路径")
     
     # 解析命令行参数
     args = parser.parse_args()
+    
+    if args.pred is not None:
+        # 如果提供了预测结果路径，则加载预测结果
+        with open(args.pred, 'rb') as f:
+            loaded_data = pickle.load(f)  # 反序列化
+            predictions = loaded_data  # 使用加载的数据作为预测结果
+    else:
+        predictions = None
     
     # 准备路径
     scene_path = os.path.join(args.data_root, args.scene_id)
     depth_dir = os.path.join(scene_path, "depth")
     rgb_dir = os.path.join(scene_path, "rgb")
-    intrinsic_path = os.path.join(scene_path, "K_depth.txt")
-    poses_path = os.path.join(scene_path, "all_poses.npy")
+
+
     
     # 检查路径是否存在
-    for path in [depth_dir, rgb_dir, intrinsic_path, poses_path]:
+    for path in [depth_dir, rgb_dir]:
         if not os.path.exists(path):
             raise FileNotFoundError(f"路径不存在: {path}")
     
     # 加载相机内参
-    intrinsic = np.loadtxt(intrinsic_path)
+    intrinsic = predictions['intrinsic'][0]  # np.loadtxt(intrinsic_path)
     
     # 加载所有位姿
-    all_poses = np.load(poses_path)
+    all_poses = predictions['extrinsic'][0] #np.load(poses_path)
+    # 创建扩展行 [0,0,0,1]，形状 [2, 1, 4]
+    extension = np.zeros((all_poses.shape[0], 1, all_poses.shape[2]))
+    extension[:, :, -1] = 1  # 最后一列赋值为1
+
+    # 沿行方向拼接（axis=1）
+    all_poses = np.concatenate((all_poses, extension), axis=1) # [N,4,4]
+    print
     
     # 处理帧ID列表
     frame_ids = [int(id_str.strip()) for id_str in args.frame_ids.split(",")]
@@ -120,7 +134,6 @@ if __name__ == "__main__":
     # 准备数据
     depth_maps = []
     color_images = []
-    poses = []
     
     # 加载每个帧的数据
     for frame_id in frame_ids:
@@ -157,26 +170,23 @@ if __name__ == "__main__":
             color = cv2.resize(color, (W, H))
         color_images.append(color)
         
-        # 添加位姿（检查索引是否有效）
-        if frame_id < len(all_poses):
-            poses.append(all_poses[frame_id])
-        else:
-            print(f"警告: 帧ID {frame_id} 超出位姿数组范围, 跳过")
+        
     
     # 检查是否有有效数据
-    if not depth_maps or not color_images or not poses:
-        raise ValueError("没有有效的图像或位姿数据，请检查输入参数")
+    if not depth_maps or not color_images :
+        raise ValueError("没有有效的图像，请检查输入参数")
     
     # 启动可视化
     visualize_with_rerun(
         depth_maps, 
         color_images,
         intrinsic,
-        poses,
+        all_poses,
         depth_scale=1.0,
         json_path=os.path.join(scene_path, "instances.json"),
         scene_path=scene_path,
-        image_idxs=frame_ids
+        image_idxs=frame_ids,
+        predictions=predictions
     )
     
     

@@ -42,6 +42,7 @@ from train_utils.general import *
 from train_utils.logging import setup_logging
 from train_utils.normalization import normalize_camera_extrinsics_and_points_batch, normalize_camera_extrinsics_and_points_boxes_batch
 from train_utils.optimizer import construct_optimizers
+import numpy as np
 
 
 class Trainer:
@@ -244,7 +245,9 @@ class Trainer:
         # Load optimizer state if available and in training mode
         if "optimizer" in checkpoint:
             logging.info(f"Loading optimizer state dict (rank {self.rank})")
-            self.optims.optimizer.load_state_dict(checkpoint["optimizer"])
+            print('checkpoint["optimizer"]', len(checkpoint["optimizer"]))
+            self.optims[0].optimizer.load_state_dict(checkpoint["optimizer"])
+            #self.optims.optimizer.load_state_dict(checkpoint["optimizer"]) #error self.optims is a list
 
         # Load training progress
         if "epoch" in checkpoint:
@@ -430,6 +433,9 @@ class Trainer:
         while self.epoch < self.max_epochs:
             set_seeds(self.seed_value + self.epoch * 100, self.max_epochs, self.distributed_rank)
             
+            #save checkpoint first
+            # self.save_checkpoint(self.epoch)
+            
             dataloader = self.train_dataset.get_loader(epoch=int(self.epoch))
             self.train_epoch(dataloader)
             
@@ -612,7 +618,7 @@ class Trainer:
             
             accum_steps = self.accum_steps
             #TODO: added by lyq to enable training on 3090
-            accum_steps = 8
+            # accum_steps = 8
             #
             if accum_steps==1:
                 chunked_batches = [batch]
@@ -782,7 +788,7 @@ class Trainer:
         return batch
 
     def _process_batch(self, batch: Mapping):      
-        print("self.data_conf.train.common_config.repeat_batch:",self.data_conf.train.common_config.repeat_batch)
+        # print("self.data_conf.train.common_config.repeat_batch:",self.data_conf.train.common_config.repeat_batch)
         if self.data_conf.train.common_config.repeat_batch:
             batch = self._apply_batch_repetition(batch)
         
@@ -804,6 +810,15 @@ class Trainer:
         batch["depths"] = normalized_depths
         batch["bbox_corners"] = normalized_bbox_corners
 
+        # save numpy file of batch["extrinsics"] and batch["bbox_corners"]
+        if self.rank == 0:  # Only save on rank 0 to avoid multiple saves
+            np.save(os.path.join(self.logging_conf.log_dir, "batch_extrinsics.npy"), 
+                batch["extrinsics"][0].cpu().numpy())
+            np.save(os.path.join(self.logging_conf.log_dir, "batch_bbox_corners.npy"), 
+                batch["bbox_corners"][0].cpu().numpy())
+            np.save(os.path.join(self.logging_conf.log_dir, "batch_intrinsics.npy"), 
+                batch["intrinsics"][0].cpu().numpy())
+            
         return batch
 
     #@!

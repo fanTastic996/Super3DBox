@@ -1018,17 +1018,18 @@ class EncoderProposals(Prompter):
         return (encoder_proposals, instances)
 
     def inference_single_image(self, output, image_size, topk):            
-        class_prob = output.pred_logits.sigmoid()
-        topk_values, topk_indexes = torch.topk(class_prob.view(-1), topk)
+        class_prob = output.pred_logits.sigmoid() #将logits转为概率值 
 
-        class_scores = topk_values
-        topk_boxes = topk_indexes // class_prob.shape[-1]
-        labels = topk_indexes % class_prob.shape[-1]
+        topk_values, topk_indexes = torch.topk(class_prob.view(-1), topk) # 取概率最高的topk个结果 sort过
+
+        class_scores = topk_values  # 预测置信度
+        topk_boxes = topk_indexes // class_prob.shape[-1] # 计算预测框索引
+        labels = topk_indexes % class_prob.shape[-1] # 计算预测类别标签 
         
         #changed by lyq 25-4-29
-        boxes = box_cxcywh_to_xyxy(output.pred_boxes)
+        boxes = box_cxcywh_to_xyxy(output.pred_boxes) 
         # boxes = output.pred_boxes
-        boxes = boxes[topk_boxes]
+        boxes = boxes[topk_boxes] # 筛选topk对应的框
         xyz = output.pred_xyz[topk_boxes]
         dims = output.pred_dims[topk_boxes]
         pose = output.pred_pose[topk_boxes] #[100,3,3]
@@ -1059,6 +1060,7 @@ class EncoderProposals(Prompter):
 
     def inference(self, prompt, output, sensor, topk):
         results = []
+        
         for index, output_ in enumerate(output):
             info = sensor["image"].sensor[index]
 
@@ -1071,7 +1073,7 @@ class EncoderProposals(Prompter):
             if info.has("T_gravity"):
                 output_.pred_pose = info.T_gravity[-1:] @ output_.pred_pose
                 
-
+            
             results.append(self.inference_single_image(output_, sensor["image"].data.image_sizes[index], topk=topk))
 
         return results
@@ -1498,7 +1500,9 @@ class CubifyHead(nn.Module):
         do_preprocess: bool = True,  # 是否执行预处理（保留接口）
         do_postprocess: bool = True,  # 是否执行后处理（保留接口）
     ):        
-        all_results = []
+        all_corners = []
+        all_logits = []
+        all_results=[]
         
         N_batch = vggt_images.shape[0]
         img_H = vggt_images.shape[-2]
@@ -1515,9 +1519,12 @@ class CubifyHead(nn.Module):
             batched_sensors = self.preprocessor.preprocess([packaged])
             
             sensor = batched_sensors[self.sensor_name] 
+            # sensor基本只有'image'的info有影响，内参K和图像HW的shape
             
             sensor['image'].data.tensor = sensor['image'].data.tensor.squeeze()
             features = self.backbone(sensor)
+            
+            
         
             # 2. 准备多尺度特征
             srcs, masks, pos_embeds = [], [], []
@@ -1595,11 +1602,19 @@ class CubifyHead(nn.Module):
                     )
                     prompt_start_idx += prompt.number_prompts
                     break  # 通常只有一个提示器产生输出
-             #[0].pred_boxes_3d.corners) #[100,8,3]
-            all_results.append(results[0].pred_boxes_3d.corners)
+            #[0].pred_boxes_3d.corners) #[100,8,3]
+            #@!
+            #TODO: not sure if it is working
+            # if self.training:
+            # all_corners.append(results[0].pred_boxes_3d.corners)
+            # all_logits.append(results[0].pred_logits)
+            # else:
+            all_results.append(results[0])
 
+            # print("debug:", results[0]) # scores pred_classes pred_boxes pred_logits pred_boxes_3d object_desc pred_proj_xy
+            
         return all_results
-
+        # return all_corners, all_logits
 
 
     def forward(self, batched_inputs, aggregated_tokens_list, patch_start_idx, do_postprocess=True):

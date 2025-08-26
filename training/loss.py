@@ -51,7 +51,7 @@ class MultitaskLoss(torch.nn.Module):
         # print("batch,",batch.keys())
         # ['seq_name', 'ids', 'images', 'depths', 'extrinsics', 'intrinsics', 'cam_points', 'world_points', 'bbox_corners', 'point_masks']
         # print("batch seq_name", batch['seq_name'])
-        # print("batch ids", batch['ids'])
+        # print("batch ids", batch['ids'])c
         # Camera pose loss - if pose encodings are predicted
         if "pose_enc_list" in predictions:
             camera_loss_dict = compute_camera_loss(predictions, batch, **self.camera)   
@@ -75,11 +75,14 @@ class MultitaskLoss(torch.nn.Module):
             total_loss = total_loss + point_loss
             loss_dict.update(point_loss_dict)
         
-        if 'box_result' in predictions:
+        # if 'box_result' in predictions:
+        if 'pred_corners' in predictions:
             # print("world_points:", batch['world_points'].shape)
             # print("bbox_corners:", batch['bbox_corners'].shape)
-            box_predictions = predictions['box_result']
-            box_loss_dict = compute_box_loss(box_predictions, batch)#, **self.box)   
+            pred_corners = predictions['pred_corners']
+            pred_logits = predictions['pred_logits']
+            # box_loss_dict = compute_box_loss(box_predictions, batch)#, **self.box)   
+            box_loss_dict = compute_box_logit_loss(pred_corners, pred_logits,  batch)#, **self.box)   
             box_loss = box_loss_dict["loss_box"] * self.box["weight"]   
             total_loss = total_loss + box_loss
             loss_dict.update(box_loss_dict)
@@ -722,14 +725,39 @@ def build_3d_cost(pred_corners, gt_corners):
     """
     N_pred, N_gt = pred_corners.shape[0], gt_corners.shape[0]
     cost = torch.zeros(N_pred, N_gt, device=pred_corners.device)
-    print("pred_corners", pred_corners.shape)
-    print("gt_corners", gt_corners.shape)
+    # print("pred_corners", pred_corners.shape)
+    # print("gt_corners", gt_corners.shape)
     for i in range(N_pred):
         for j in range(N_gt):
             # 两个 8×3 点集之间的 Chamfer
             dist = torch.cdist(pred_corners[i], gt_corners[j])   # [8,8]
             chamfer_ij = dist.min(dim=1)[0].mean() + dist.min(dim=0)[0].mean()
             cost[i, j] = chamfer_ij
+    return cost
+
+# ---------- 1) 构造 3D Chamfer 和 logits 的代价矩阵 ----------
+def build_3d_cost_logits(pred_corners, gt_corners, pred_logits, cost_kwargs):
+    """
+    pred_corners: [N_pred, 8, 3]
+    gt_corners  : [N_gt, 8, 3] 
+    pred_logits:  [N_pred, 2]  每个预测框的 logits, 0维度是背景概率, 1维度是前景概率
+    logit_weight: weight for logit cost component
+    return      : [N_pred, N_gt]  每个元素是 (pred_i, gt_j) 的 Chamfer 距离 + logit cost
+    """
+    N_pred, N_gt = pred_corners.shape[0], gt_corners.shape[0]
+    cost = torch.zeros(N_pred, N_gt, device=pred_corners.device)
+    
+    for i in range(N_pred):
+        for j in range(N_gt):
+            # 两个 8×3 点集之间的 Chamfer
+            dist = torch.cdist(pred_corners[i], gt_corners[j])   # [8,8]
+            chamfer_ij = dist.min(dim=1)[0].mean() + dist.min(dim=0)[0].mean()
+            
+            # 添加 logit cost - 对于 GT box，我们希望前景概率高（logits[1]大）
+            # 所以 logit cost = -pred_logits[i, 1] （负号表示前景概率越高，cost 越小）
+            logit_cost = -pred_logits[i, 1]  # 前景logit越大，cost越小
+            1
+            cost[i, j] = cost_kwargs['chamfer_weight'] * chamfer_ij + cost_kwargs['class_weight'] * logit_cost
     return cost
 
 # ---------- 总接口 ----------
@@ -757,15 +785,65 @@ def compute_box_loss_single(
     pred_idx, gt_idx = hungarian_2d_matching(cost_bbox)
 
     # 3) 取出匹配上的角点
-    # print("pred_idx",pred_idx)
-    # print("gt_idx",gt_idx)
     matched_pred = pred_corners[pred_idx]
     matched_gt   = gt_corners[gt_idx]
 
     # 4) Chamfer Loss
     loss = chamfer_loss(matched_pred, matched_gt)
     
+    
+    # if loss > 100:
+    #     print("matched_pred", matched_pred[0],matched_pred.shape)
+    #     print("matched_gt", matched_gt[0],matched_gt.shape)
+    #     print("\n")
+    
+    return loss
 
+
+# ---------- 总接口 ----------
+def compute_box_logit_loss_single(
+    pred_corners,   # [N_pred, 8, 3]
+    pred_logits,    # [N_pred, 2]
+    gt_corners,     # [N_gt, 8, 3]
+    pred_2d=None,        # [N_pred, 4]  用于匹配
+    gt_2d=None,          # [N_gt, 4]
+    w_box = 1.0, # Chamfer loss weight
+    w_class = 1.0, # Classification loss weight
+    ):
+    """
+    1. 用 3D Chamfer 和 logits 做匈牙利匹配
+    2. 匹配成功的角点用 Chamfer 损失
+    3. 对匹配上的box使用前景分类loss，未匹配上的使用背景分类loss
+    """
+    N_pred, N_gt = pred_corners.shape[0], gt_corners.shape[0]
+    
+    # 创建分类标签：所有预测框初始为背景(0)
+    class_labels = torch.zeros(N_pred, dtype=torch.long, device=pred_corners.device)
+    
+    chamfer_loss_val = torch.tensor(0.0, device=pred_corners.device, requires_grad=True)
+    
+
+    # 1) 构造代价矩阵（包含 Chamfer 距离和 logit 代价）
+    cost_kwargs = dict(chamfer_weight=10.0, class_weight=1.0)
+    cost_bbox = build_3d_cost_logits(pred_corners, gt_corners, pred_logits, cost_kwargs)
+    
+    # 2) 匈牙利匹配
+    pred_idx, gt_idx = hungarian_2d_matching(cost_bbox)
+
+    # 3) 取出匹配上的角点并计算 Chamfer Loss
+    if len(pred_idx) > 0:
+        matched_pred = pred_corners[pred_idx]
+        matched_gt = gt_corners[gt_idx]
+        chamfer_loss_val = chamfer_loss(matched_pred, matched_gt)
+        
+        # 4) 将匹配上的预测框标记为前景(1)
+        class_labels[pred_idx] = 1
+
+    # 5) 分类损失：对所有预测框计算交叉熵损失
+    class_loss = F.cross_entropy(pred_logits, class_labels)
+    
+    # 6) 总损失
+    loss = w_box * chamfer_loss_val + w_class * class_loss
     
     return loss
 
@@ -786,7 +864,7 @@ def compute_box_loss(predictions, batch):
         pred_box_corners = cur_predictions
 
         gt_box_corners = gt_box_corners_seq #gt_box_corners 
-
+        
         loss = compute_box_loss_single(pred_box_corners,gt_box_corners)
         # loss = chamfer_loss(pred_box_corners, gt_box_corners) 
  
@@ -797,7 +875,36 @@ def compute_box_loss(predictions, batch):
     }
 
     return loss_dict
+
+
+def compute_box_logit_loss(pred_corners, pred_logits, batch):
     
+    total_loss = 0
+    N_seq = len(pred_corners)
+    # calcudate loss for each sequence
+    for i in range(N_seq):
+        pred_box_corners = pred_corners[i]
+        pred_box_logits = pred_logits[i]
+        N_imgs = len(pred_box_corners)
+
+        gt_box_corners_seq = batch['bbox_corners'][i] # [N_gt, 8 ,3]
+        gt_box_corners_seq_sum = gt_box_corners_seq.sum(dim=[1, 2]) #[500]
+        gt_box_mask = gt_box_corners_seq_sum != 0.0
+        gt_box_corners_seq = gt_box_corners_seq[gt_box_mask]  # [N_gt, 8, 3]
+
+
+        gt_box_corners = gt_box_corners_seq #gt_box_corners 
+        
+        loss = compute_box_logit_loss_single(pred_box_corners, pred_box_logits, gt_box_corners)
+        # loss = chamfer_loss(pred_box_corners, gt_box_corners) 
+ 
+        total_loss += loss
+
+    loss_dict = {
+        f"loss_box": total_loss,
+    }
+
+    return loss_dict
     
 ########################################################################################
 ########################################################################################

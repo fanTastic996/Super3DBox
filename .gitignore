@@ -151,5 +151,8 @@ skyseg.onnx
 training/logs/tensorboard/
 training/logs/exp001/
 training/logs/log.txt
+training/backup
 
 examples/
+
+vis_results/

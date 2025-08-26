@@ -25,7 +25,7 @@ data:
       debug: False
       get_nearby: True
       load_depth: True
-      img_nums: [3,3] #[2, 5] #[2, 24]
+      img_nums: [2,6] #[2, 5] #[2, 24]
       max_img_per_gpu: 48
       allow_duplicate_img: True
       repeat_batch: False
@@ -45,7 +45,7 @@ data:
         gau_blur: False
   val:
     _target_: data.dynamic_dataloader.DynamicTorchDataset
-    num_workers: 8
+    num_workers: 8 #8
     max_img_per_gpu: 48
     # Shuffling in PyTorch DataLoader can sometimes copy large dicts and exceed CPU memory
     # (see: https://github.com/pytorch/pytorch/issues/13246).
