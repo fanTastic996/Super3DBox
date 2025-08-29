@@ -197,7 +197,9 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                 all_corners, all_logits = self.box_head(
                     images,
                     aggregated_tokens_list,
-                    patch_start_idx
+                    patch_start_idx,
+                    intrinsic=intrinsics,
+                    extrinsic=extrinsics,
                     # images=images,
                 )
                 # print("box_result",  len(box_result), len(box_result[0]), len(box_result[0][0])) 
