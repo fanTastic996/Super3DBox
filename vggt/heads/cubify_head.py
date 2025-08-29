@@ -1606,15 +1606,15 @@ class CubifyHead(nn.Module):
             #@!
             #TODO: not sure if it is working
             # if self.training:
-            # all_corners.append(results[0].pred_boxes_3d.corners)
-            # all_logits.append(results[0].pred_logits)
+            all_corners.append(results[0].pred_boxes_3d.corners)
+            all_logits.append(results[0].pred_logits)
             # else:
-            all_results.append(results[0])
+            # all_results.append(results[0])
 
             # print("debug:", results[0]) # scores pred_classes pred_boxes pred_logits pred_boxes_3d object_desc pred_proj_xy
             
-        return all_results
-        # return all_corners, all_logits
+        # return all_results
+        return all_corners, all_logits
 
 
     def forward(self, batched_inputs, aggregated_tokens_list, patch_start_idx, do_postprocess=True):

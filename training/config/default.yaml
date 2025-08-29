@@ -89,7 +89,7 @@ checkpoint:
 loss:
   _target_: loss.MultitaskLoss
   camera: 
-    weight: 5.0
+    weight: 20 #5.0
     loss_type: "l1" # The paper uses smooth l1 loss, but we found l1 loss is more stable than smooth l1 and l2 loss.  
   depth:
     weight: 1.0
@@ -114,11 +114,11 @@ optim:
 
   optimizer:
     _target_: torch.optim.AdamW
-    lr: 5e-4 #TODO:5e-5 for original
+    lr: 5e-5 #TODO:5e-5 for original
     weight_decay: 0.05
 
   frozen_module_names:
-      - "*aggregator*"  # example, freeze the aggregator
+      - "*aggregator*"  # example, freeze the aggregator  - "*box_head.backbone*"
       - "*box_head.backbone*"
       
 

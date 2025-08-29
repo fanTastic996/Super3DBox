@@ -154,7 +154,10 @@ class CA1MDataset(BaseDataset):
             ids = np.array([180,200])
             
         image_idxs = ids  # 获取图像ID
-
+        #TODO:
+        seq_name = '42444750'
+        
+        
         # print("Seq", seq_name,'ids', ids) 
         self.seqname= seq_name
         # Load sequence data
@@ -185,7 +188,11 @@ class CA1MDataset(BaseDataset):
         #TODO:需要处理没有可见的GT boxes的情况
         bbox_corners = self.process_bbox_corners(filtered_bbox_corners)  # 处理边界框角点
         
-        seq_poses = scene_data['poses'].reshape(-1, 4, 4)  # 获取序列位姿
+        seq_poses = scene_data['poses'].reshape(-1, 4, 4)  # 获 取序列位姿
+        #TODO: seems right, not sure 25-8-28
+        seq_poses = closed_form_inverse_se3(seq_poses).reshape(-1, 4, 4)
+        
+        
         K_rgb = scene_data['K_rgb']
          
         for img_idx in image_idxs:

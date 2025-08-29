@@ -200,7 +200,9 @@ def camera_loss_single(pred_pose_enc, gt_pose_enc, loss_type="l1"):
         loss_FL = (pred_pose_enc[..., 7:] - gt_pose_enc[..., 7:]).norm(dim=-1)
     else:
         raise ValueError(f"Unknown loss type: {loss_type}")
-
+    # print(f"pred_T:{pred_pose_enc[0,:, :3]}")
+    # print(f"gt_T  :{gt_pose_enc[0,:, :3]}, loss_T:{loss_T.mean()}")
+    
     # Check/fix numerical issues (nan/inf) for each loss component
     loss_T = check_and_fix_inf_nan(loss_T, "loss_T")
     loss_R = check_and_fix_inf_nan(loss_R, "loss_R")

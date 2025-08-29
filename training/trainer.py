@@ -227,7 +227,7 @@ class Trainer:
         if self.optim_conf.amp.enabled and "scaler" in checkpoint:
             self.scaler.load_state_dict(checkpoint["scaler"])
 
-    def _load_resuming_checkpoint_mine(self, ckpt_path, cubify_path):
+    def _load_resuming_checkpoint_mine(self, ckpt_path, cubify_path, load_cubify=True):
         """Loads a checkpoint from the given path to resume training."""
         logging.info(f"Resuming training from {ckpt_path} (rank {self.rank})")
 
@@ -275,7 +275,8 @@ class Trainer:
                     print(f"Warning: Key {k} not found in current model")
         
         # 加载筛选后的参数
-        self.model.box_head.load_state_dict(filtered_dict, strict=False)  # strict=False 允许部分加载
+        if load_cubify:
+            self.model.box_head.load_state_dict(filtered_dict, strict=False)  # strict=False 允许部分加载
     
     def _setup_device(self, device: str):
         """Sets up the device for training (CPU or CUDA)."""
@@ -435,6 +436,7 @@ class Trainer:
             
             #save checkpoint first
             # self.save_checkpoint(self.epoch)
+            # print("save checkpoint first!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             
             dataloader = self.train_dataset.get_loader(epoch=int(self.epoch))
             self.train_epoch(dataloader)
@@ -811,14 +813,25 @@ class Trainer:
         batch["bbox_corners"] = normalized_bbox_corners
 
         # save numpy file of batch["extrinsics"] and batch["bbox_corners"]
-        if self.rank == 0:  # Only save on rank 0 to avoid multiple saves
-            np.save(os.path.join(self.logging_conf.log_dir, "batch_extrinsics.npy"), 
-                batch["extrinsics"][0].cpu().numpy())
-            np.save(os.path.join(self.logging_conf.log_dir, "batch_bbox_corners.npy"), 
-                batch["bbox_corners"][0].cpu().numpy())
-            np.save(os.path.join(self.logging_conf.log_dir, "batch_intrinsics.npy"), 
-                batch["intrinsics"][0].cpu().numpy())
+        # if self.rank == 0:  # Only save on rank 0 to avoid multiple saves
+            # np.save(os.path.join(self.logging_conf.log_dir, "batch_extrinsics.npy"), 
+            #     batch["extrinsics"][0].cpu().numpy())
+            # np.save(os.path.join(self.logging_conf.log_dir, "batch_bbox_corners.npy"), 
+            #     batch["bbox_corners"][0].cpu().numpy())
+            # np.save(os.path.join(self.logging_conf.log_dir, "batch_intrinsics.npy"), 
+            #     batch["intrinsics"][0].cpu().numpy())
             
+            # seq_name = '42444750'
+            # np.save(f"/home/lanyuqing/myproject/vggt/vis_results/poses_{seq_name}.npy", batch['extrinsics'][0].cpu().numpy())
+            # np.save(f"/home/lanyuqing/myproject/vggt/vis_results/intrisincs_{seq_name}.npy", batch['intrinsics'][0].cpu().numpy())
+            # np.save(f"/home/lanyuqing/myproject/vggt/vis_results/depth_{seq_name}.npy", batch['depths'][0].cpu().numpy())
+            # np.save(f"/home/lanyuqing/myproject/vggt/vis_results/rgb_{seq_name}.npy", batch['images'][0].cpu().numpy())
+            # np.save(f"/home/lanyuqing/myproject/vggt/vis_results/worldpc_{seq_name}.npy", batch['world_points'][0].cpu().numpy())
+            # np.save(f"/home/lanyuqing/myproject/vggt/vis_results/corners_{seq_name}.npy", batch['bbox_corners'][0].cpu().numpy())
+            # print("world points",batch['world_points'][0].shape) 
+            # print("bbox_corners",batch['bbox_corners'][0].shape) 
+            # print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            # exit(0)
         return batch
 
     #@!
