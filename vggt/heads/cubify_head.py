@@ -1497,6 +1497,8 @@ class CubifyHead(nn.Module):
         vggt_images,  # 批处理的传感器数据字典 # vggt images: ([4(B), 3(N), 3, 476, 518])
         aggregated_tokens_list, #N个[266, 2048]的list
         patch_start_idx,
+        intrinsic=None,
+        extrinsic=None,
         do_preprocess: bool = True,  # 是否执行预处理（保留接口）
         do_postprocess: bool = True,  # 是否执行后处理（保留接口）
     ):        
@@ -1520,6 +1522,22 @@ class CubifyHead(nn.Module):
             
             sensor = batched_sensors[self.sensor_name] 
             # sensor基本只有'image'的info有影响，内参K和图像HW的shape
+            
+            
+            
+            if intrinsic is not None and extrinsic is not None:
+                image_info = ImageMeasurementInfo(
+                    size = (img_H, img_W),
+                    K = intrinsic[j,0].detach().cpu()
+                    [None])
+                sample["sensor_info"].wide.image.resize((img_H, img_W))
+                # print("intrinsic[j,0].detach().cpu()[:3,:3]",intrinsic[j,0].detach().cpu()[:3,:3].shape,sample["sensor_info"].wide.image.K.shape)
+                sample["sensor_info"].wide.image.K[0,:3,:3]=intrinsic[j,0].detach().cpu()[:3,:3]
+                # new_row = torch.tensor([[0, 0, 0, 1]]).to(extrinsic.device)
+                # new_extrinsics = torch.cat([extrinsic[j,0], new_row], dim=0)
+                sample["sensor_info"].wide.RT[0,:3,:4] = extrinsic[j,0].detach().cpu()
+            
+            
             
             sensor['image'].data.tensor = sensor['image'].data.tensor.squeeze()
             features = self.backbone(sensor)
