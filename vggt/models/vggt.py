@@ -134,7 +134,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
             pixel_mean=[123.675, 116.28, 103.53],
             pixel_std=[58.395, 57.12, 57.375]) if enable_cubify else None
         
-    def forward(self, images: torch.Tensor, query_points: torch.Tensor = None):
+    def forward(self, images: torch.Tensor, intrinsics: torch.Tensor= None, extrinsics: torch.Tensor= None, query_points: torch.Tensor = None):
         """
         Forward pass of the VGGT model.
 
