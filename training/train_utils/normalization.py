@@ -403,6 +403,8 @@ def normalize_camera_extrinsics_and_points_batch(
 #     # 返回归一化后的四元组结果
 #     return new_extrinsics, new_cam_points, new_world_points, new_depths, new_bbox_corners
 
+
+# v2- vggt transform
 def normalize_camera_extrinsics_and_points_boxes_batch(
     extrinsics: torch.Tensor,
     cam_points: Optional[torch.Tensor] = None,

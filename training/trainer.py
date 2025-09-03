@@ -275,8 +275,8 @@ class Trainer:
                     print(f"Warning: Key {k} not found in current model")
         
         # 加载筛选后的参数
-        if load_cubify:
-            self.model.box_head.load_state_dict(filtered_dict, strict=False)  # strict=False 允许部分加载
+        # if load_cubify:
+        self.model.box_head.load_state_dict(filtered_dict, strict=False)  # strict=False 允许部分加载
     
     def _setup_device(self, device: str):
         """Sets up the device for training (CPU or CUDA)."""
@@ -802,7 +802,8 @@ class Trainer:
                 world_points=batch["world_points"],
                 depths=batch["depths"],
                 point_masks=batch["point_masks"],
-                bbox_corners=batch["bbox_corners"]
+                bbox_corners=batch["bbox_corners"],
+                scale_by_points=False
             )
 
         # Replace the original values in the batch with the normalized ones.
@@ -846,7 +847,8 @@ class Trainer:
         # print("batch keys",batch.keys()) # dict_keys(['seq_name', 'ids', 'images', 'depths', 'extrinsics', 'intrinsics', 'cam_points', 'world_points', 'point_masks'])
         # print('debug batch["images"]',batch["images"].shape) #([4, 9, 3, 476, 518]) #[B, N, 3, H, W] B is adjusted according to N B: batch size, S: sequence length, 3: RGB channels, H: height, W: width
 
-        y_hat = model(images=batch["images"])
+        # y_hat = model(images=batch["images"])
+        y_hat = model(images=batch["images"], intrinsics=batch["intrinsics"], extrinsics=batch["extrinsics"])
         
         # Loss computation
         loss_dict = self.loss(y_hat, batch)

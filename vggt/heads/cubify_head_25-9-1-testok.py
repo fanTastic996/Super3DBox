@@ -1424,21 +1424,18 @@ class CubifyHead(nn.Module):
         wide = PosedSensorInfo()            
         image_info = ImageMeasurementInfo(
             # size=(self.img_width, self.img_height),
-            size=(518, 518), # H W
-            # size=(1024, 768), # work
-            K=torch.tensor([[573.6569,   0.0000, 259.0],
-         [  0.0000, 575.0908, 259.0],
-         [  0.0000,   0.0000,   1.0000]])[None])
+            # size=(476, 512), # H W
+            size=(1024, 768), # work
             # K=torch.tensor([
             #     [215, 0.0, 215],
             #     [0.0, 215, 215],
             #     [0.0, 0.0, 1.0]
             # ])[None])
-            # K=torch.tensor([
-            #     [852.9301, 0.0, 382.9973],
-            #     [0.0, 852.9301, 512.4680],
-            #     [0.0, 0.0, 1.0]
-            # ])[None])
+            K=torch.tensor([
+                [852.9301, 0.0, 382.9973],
+                [0.0, 852.9301, 512.4680],
+                [0.0, 0.0, 1.0]
+            ])[None])
         wide.image = image_info
         new_size = (int(wide.image.size[0] ), int(wide.image.size[1] ))
         wide.image = wide.image.resize(new_size)
@@ -1525,42 +1522,93 @@ class CubifyHead(nn.Module):
             sample = {"wide": {'image': vggt_images[j]},
                       "sensor_info": self.sensor_info}
             
-            # vggt images[1, 2, 3, 518, 518]
-
-            sample["wide"]['image'] = (sample["wide"]['image'] * 255.).to(torch.uint8)
-
+            #vggt images[1,2,3,518,518]
             
-            if intrinsic is not None and extrinsic is not None:
-                image_info = ImageMeasurementInfo(
-                    size = (img_H, img_W),
-                    K = intrinsic[j,0].detach().cpu()
-                    [None])
-                sample["sensor_info"].wide.image = sample["sensor_info"].wide.image.resize((img_H, img_W))
-                # print("intrinsic[j,0].detach().cpu()[:3,:3]",intrinsic[j,0].detach().cpu()[:3,:3].shape,sample["sensor_info"].wide.image.K.shape)
-                sample["sensor_info"].wide.image.K[0,:3,:3]=intrinsic[j,0].detach().cpu()[:3,:3]
-                # tmp_ex = extrinsic[j,0].detach().cpu()
-                # new_row = torch.tensor([[0, 0, 0, 1]]) #.to(extrinsic.device)
-                # new_extrinsics = torch.linalg.inv(torch.cat([tmp_ex, new_row], dim=0)) #[4,4]
+            #####################################################3  
+            # # 读取2张指定的RGB图片并拼接
+            image_path_1 = "/data/lyq/ca1m/ca1m/train-CA-1M-slam/42444750/rgb/180.png"  # 替换为实际路径
+            image_path_2 = "/data/lyq/ca1m/ca1m/train-CA-1M-slam/42444750/rgb/200.png"  # 替换为实际路径
+            print("read img")
+            # 加载并预处理第一张图片
+            image_1 = np.array(Image.open(image_path_1).convert('RGB'))#.resize((img_W, img_H))) 
+            img_H = vggt_images.shape[0]
+            img_W = vggt_images.shape[1]
+
+            image_2 = np.array(Image.open(image_path_2).convert('RGB'))#.resize((img_W, img_H))) 
+            print("before np.min max avg",np.min(image_1), np.max(image_1),np.average(image_1),image_1.shape)
+            # 转换为torch tensor并调整维度 [H, W, 3] -> [3, H, W]
+            image_1 = torch.from_numpy(image_1).permute(2, 0, 1).float()
+            image_2 = torch.from_numpy(image_2).permute(2, 0, 1).float() 
+
+            # 拼接成 [2, 3, H, W]
+            combined_images = torch.stack([image_1, image_2], dim=0)  # [2, 3, H, W]
+
+            # # 更新sample中的图像数据
+            sample["wide"]['image'] = combined_images
+            # sample["wide"]['image'] = sample["wide"]['image']*255.
+            #####################################################3
+            #TODO:图片data和img shape
+            
+            
+            # if intrinsic is not None and extrinsic is not None:
+            #     image_info = ImageMeasurementInfo(
+            #         size = (img_H, img_W),
+            #         K = intrinsic[j,0].detach().cpu()
+            #         [None])
+            #     sample["sensor_info"].wide.image.resize((img_H, img_W))
+            #     # print("intrinsic[j,0].detach().cpu()[:3,:3]",intrinsic[j,0].detach().cpu()[:3,:3].shape,sample["sensor_info"].wide.image.K.shape)
+            #     sample["sensor_info"].wide.image.K[0,:3,:3]=intrinsic[j,0].detach().cpu()[:3,:3]
+            #     tmp_ex = extrinsic[j,0].detach().cpu()
+            #     new_row = torch.tensor([[0, 0, 0, 1]]) #.to(extrinsic.device)
+            #     new_extrinsics = torch.linalg.inv(torch.cat([tmp_ex, new_row], dim=0)) #[4,4]
                 
-                # sample["sensor_info"].wide.RT[0,:3,:4] = new_extrinsics[:3,:4] # extrinsic[j,0].detach().cpu()
-                # print("T_gravity:", sample["sensor_info"].wide.T_gravity )
-            
-            # sample["sensor_info"]的内参K，图像HW的shape，外参pose影响的T_gravity都会对结果产生影响，主要是decoder
-            
-            # GT T_gravity
+            #     sample["sensor_info"].wide.RT[0,:3,:4] = new_extrinsics[:3,:4] # extrinsic[j,0].detach().cpu()
             sample["sensor_info"].wide.T_gravity = torch.tensor([[[ 0.9947,  0.0910, -0.0473],
                             [-0.1025,  0.8826, -0.4588],
                             [ 0.0000,  0.4612,  0.8873]]])
             
+            print("T_gravity:", sample["sensor_info"].wide.T_gravity )
             packaged = self.augmentor.package(sample)
             device = self.pixel_mean
             packaged = move_input_to_current_device(packaged, device)
             batched_sensors = self.preprocessor.preprocess([packaged])
             
-            sensor = batched_sensors[self.sensor_name]   
-            if len(sensor['image'].data.tensor.shape)>4:
-                sensor['image'].data.tensor = sensor['image'].data.tensor.squeeze(0) 
-
+            sensor = batched_sensors[self.sensor_name] 
+            # sensor基本只有'image'的info有影响，内参K和图像HW的shape
+            
+            
+            
+            
+                
+                
+            sensor['image'].data.tensor = sensor['image'].data.tensor.squeeze() 
+            #>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            sensor['image'].data.tensor = sensor['image'].data.tensor[:1]
+            # # Convert to numpy and visualize
+            images_np = sensor['image'].data.tensor.permute(0, 2, 3, 1).cpu().numpy()  # Convert to [N, H, W, 3]
+            # Create output directory if it doesn't exist
+            output_dir = "/home/lanyuqing/myproject/vggt/vis_results"
+            os.makedirs(output_dir, exist_ok=True)
+            # Save each image
+            for i, img_np in enumerate(images_np):
+                # Clip values to [0, 1] and convert to uint8
+                print("np.min max avg",np.min(img_np), np.max(img_np),np.average(img_np),img_np.shape)
+                img_np = np.clip(img_np, 0, 1)
+                img_np = (img_np * 255).astype(np.uint8)
+                
+                # Convert to PIL Image and save
+                img_pil = Image.fromarray(img_np)
+                output_path = os.path.join(output_dir, f"processed_image_{i}.png")
+                img_pil.save(output_path)
+                print(f"Saved visualized image to: {output_path}")
+            #     exit(0)
+            #>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            print("sensor",sensor['image'].data.tensor[0])
+            print("sensor",sensor['image'].info[0].K)
+            print("sensor",sensor['image'].info[0].size)
+            np.save("/home/lanyuqing/myproject/vggt/vis_results/180.npy",sensor['image'].data.tensor[0].cpu().numpy())
+            
+            
             features = self.backbone(sensor)
             
         
@@ -1583,19 +1631,20 @@ class CubifyHead(nn.Module):
   
             # 特征融合
             #extract VGGT增强的3D视觉特征
-            vggt_features = self.extract_image_vggt_embeds_3d(aggregated_tokens_list[-2],patch_start_idx,img_H,img_W, j)  # [batch_size, num_frames, C, H, W]
+            # vggt_features = self.extract_image_vggt_embeds_3d(aggregated_tokens_list[-2],patch_start_idx,img_H,img_W, j)  # [batch_size, num_frames, C, H, W]
 
  
-            vggt_features = vggt_features.view(src_flatten.shape[0],-1,vggt_features.shape[-1])  
+            # vggt_features = vggt_features.view(src_flatten.shape[0],-1,vggt_features.shape[-1])  
             # print('src_flatten',src_flatten.shape) # [N, 1024, 256]
             # print('vggt_features',vggt_features.shape) # [N, 266, 2048]
-            multiframe_fused_features = self.fusion_module(src_flatten, vggt_features)
+            # multiframe_fused_features = self.fusion_module(src_flatten, vggt_features)
             # print(f"输出尺寸: {multiframe_fused_features.shape}")  
 
             # fuse multiframe features
             # fused_features = self.frame_merger(multiframe_fused_features)  # [1*N, 1024, 256] -> [1, 1024, 256]
-            fused_features = torch.mean(multiframe_fused_features, dim=0, keepdim=True)  # [N, 1024, 256] -> [1, 1024, 256] N=image_num
-            
+            # fused_features = torch.mean(multiframe_fused_features, dim=0, keepdim=True)  # [N, 1024, 256] -> [1, 1024, 256] N=image_num
+            fused_features = src_flatten[:1] #multiframe_fused_features[:1]  # [N, 1024, 256] -> [1, 1024, 256] N=image_num
+            print("src_flatten[0]", src_flatten[0])
             # 4. 生成提示（Prompt）
             '''
             Prompter的核心作用是根据图像特征生成​​物体查询（Object Queries）​​，这些查询作为Decoder的输入，承载了模型对场景中“可能存在哪些物体”的初始假设。其本质是一种​​物体候选生成器​​，类似于2D检测中的Region Proposal Network（RPN）
@@ -1645,15 +1694,15 @@ class CubifyHead(nn.Module):
             #@!
             #TODO: not sure if it is working
             # if self.training:
-            all_corners.append(results[0].pred_boxes_3d.corners)
-            all_logits.append(results[0].pred_logits)
+            # all_corners.append(results[0].pred_boxes_3d.corners)
+            # all_logits.append(results[0].pred_logits)
             # else:
-            # all_results.append(results[0])
+            all_results.append(results[0])
 
             # print("debug:", results[0]) # scores pred_classes pred_boxes pred_logits pred_boxes_3d object_desc pred_proj_xy
             
-        # return all_results
-        return all_corners, all_logits
+        return all_results
+        # return all_corners, all_logits
 
 
     def forward(self, batched_inputs, aggregated_tokens_list, patch_start_idx, intrinsic=None, extrinsic=None, do_postprocess=True):

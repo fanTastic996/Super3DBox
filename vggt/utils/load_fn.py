@@ -8,6 +8,7 @@ import torch
 from PIL import Image
 from torchvision import transforms as TF
 import numpy as np
+import os
 
 
 def load_and_preprocess_images_square(image_path_list, target_size=1024):
@@ -135,10 +136,11 @@ def load_and_preprocess_images(image_path_list, mode="crop"):
     target_size = 518
 
     # First process all images and collect their shapes
-    for image_path in image_path_list:
+
+    for i, image_path in enumerate(image_path_list):
         # Open image
         img = Image.open(image_path)
-
+        
         # If there's an alpha channel, blend onto white background:
         if img.mode == "RGBA":
             # Create white background
@@ -167,6 +169,7 @@ def load_and_preprocess_images(image_path_list, mode="crop"):
 
         # Resize with new dimensions (width, height)
         img = img.resize((new_width, new_height), Image.Resampling.BICUBIC)
+        
         img = to_tensor(img)  # Convert to tensor (0, 1)
 
         # Center crop height if it's larger than 518 (only in crop mode)
@@ -226,5 +229,24 @@ def load_and_preprocess_images(image_path_list, mode="crop"):
         # Verify shape is (1, C, H, W)
         if images.dim() == 3:
             images = images.unsqueeze(0)
-
-    return images
+    
+    
+    
+    # Convert to numpy and visualize
+    # images_np = images.permute(0, 2, 3, 1).cpu().numpy()  # Convert to [N, H, W, 3]
+    # # Create output directory if it doesn't exist
+    # output_dir = "/home/lanyuqing/myproject/vggt/vis_results"
+    # os.makedirs(output_dir, exist_ok=True)
+    # # Save each image
+    # for i, img_np in enumerate(images_np):
+    #     # Clip values to [0, 1] and convert to uint8
+    #     img_np = np.clip(img_np, 0, 1)
+    #     img_np = (img_np * 255).astype(np.uint8)
+        
+    #     # Convert to PIL Image and save
+    #     img_pil = Image.fromarray(img_np)
+    #     output_path = os.path.join(output_dir, f"processed_image_{i}.png")
+    #     img_pil.save(output_path)
+    #     print(f"Saved visualized image to: {output_path}")
+    
+    return images #[N, 3, H=518, W=518]

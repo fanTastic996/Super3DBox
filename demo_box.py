@@ -18,6 +18,8 @@ model = VGGT(enable_camera=True, enable_point=False, enable_depth=False, enable_
 _URL = "/home/lanyuqing/myproject/vggt/training/logs/exp001/ckpts/checkpoint.pt"
 model_dict= torch.load(_URL)
 model.load_state_dict(model_dict["model"])
+
+
 model.eval()
 model.to(device)
 
@@ -28,6 +30,7 @@ data_root = '/data/lyq/ca1m/ca1m/train-CA-1M-slam'
 scene_id = '42444750'
 image_names = [f"{data_root}/{scene_id}/rgb/180.png", f"{data_root}/{scene_id}/rgb/200.png"]  
 images = load_and_preprocess_images(image_names).to(device)
+print("images", images.shape, torch.max(images), torch.min(images))
 
 wanted_keys = ["extrinsic", "intrinsic", "box_result"]
 
@@ -41,8 +44,8 @@ with torch.no_grad():
         extrinsic, intrinsic = pose_encoding_to_extri_intri(predictions["pose_enc"], images.shape[-2:])
         predictions["extrinsic"] = extrinsic
         predictions["intrinsic"] = intrinsic
-        print('extrinsic',extrinsic.shape)
-        print('intrinsic',intrinsic.shape)
+        print('extrinsic',extrinsic.shape, extrinsic)
+        print('intrinsic',intrinsic.shape, intrinsic)
         pred_3d_boxes = predictions['box_result'][0]
   
         
@@ -56,7 +59,11 @@ with torch.no_grad():
             "center": bboxes_3d.gravity_center.cpu().numpy(),
             "size": bboxes_3d.dims.cpu().numpy(),
         }
-        print("center", bboxes_3d.gravity_center.cpu().numpy())
+        
+        valid_mask = pred_3d_boxes.scores.cpu().numpy()>=0.0
+        print("center", bboxes_3d.gravity_center.cpu().numpy()[valid_mask])
+        print("size", bboxes_3d.dims.cpu().numpy()[valid_mask])
+        print("R", bboxes_3d.R.cpu().numpy()[valid_mask])
         
         # print(boxes_3d.R.cpu().numpy().shape,poses.shape)
         print("Saving predictions...")

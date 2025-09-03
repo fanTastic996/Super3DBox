@@ -117,9 +117,10 @@ class ImageMeasurementInfo(MeasurementInfo):
         width_scale = new_size[0] / self.size[0]
         height_scale = new_size[1] / self.size[1]
 
+        # TODO: denote this 25-8-29
         # Might be some some pixel errors.
-        if not np.isclose(height_scale, width_scale, atol=0.025):
-            print(f"Rescaling from {self.size} to {new_size}. This does not seem uniform but may be due to discretization error.")
+        # if not np.isclose(height_scale, width_scale, atol=0.025):
+            # print(f"Rescaling from {self.size} to {new_size}. This does not seem uniform but may be due to discretization error.")
 
         result = self.rescale(height_scale)
         # Even if it's not the best idea, always make sure the given size is

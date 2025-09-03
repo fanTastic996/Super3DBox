@@ -50,8 +50,6 @@ class MultitaskLoss(torch.nn.Module):
         loss_dict = {}
         # print("batch,",batch.keys())
         # ['seq_name', 'ids', 'images', 'depths', 'extrinsics', 'intrinsics', 'cam_points', 'world_points', 'bbox_corners', 'point_masks']
-        # print("batch seq_name", batch['seq_name'])
-        # print("batch ids", batch['ids'])c
         # Camera pose loss - if pose encodings are predicted
         if "pose_enc_list" in predictions:
             camera_loss_dict = compute_camera_loss(predictions, batch, **self.camera)   
@@ -897,7 +895,7 @@ def compute_box_logit_loss(pred_corners, pred_logits, batch):
 
         gt_box_corners = gt_box_corners_seq #gt_box_corners 
         
-        loss = compute_box_logit_loss_single(pred_box_corners, pred_box_logits, gt_box_corners)
+        loss = compute_box_logit_loss_single(pred_box_corners, pred_box_logits, gt_box_corners, w_box=1.0, w_class=0.05)
         # loss = chamfer_loss(pred_box_corners, gt_box_corners) 
  
         total_loss += loss

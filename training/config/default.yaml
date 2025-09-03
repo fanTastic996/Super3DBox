@@ -5,13 +5,13 @@ exp_name: exp001
 img_size: 518
 num_workers: 8 #1 #8 #1
 seed_value: 42
-accum_steps: 2 # We did not use gradient accumulation in our training, while if you suffer from OOM, you can try to use it.
+accum_steps: 4 #2 # We did not use gradient accumulation in our training, while if you suffer from OOM, you can try to use it.
 patch_size: 14
 val_epoch_freq: 5
 max_img_per_gpu: 48
 
 limit_train_batches: 400 # 800 ori
-limit_val_batches: 400
+limit_val_batches: 100 #400 ori
 
 
 data:
@@ -97,7 +97,7 @@ loss:
     valid_range: 0.98
   box: 
     weight: 1.0 # 2.0 #5.0
-    loss_type: "l1"
+    loss_type: "l1" #l1
   point: null
   # If you want to enable point, use the following config
   # point: 

@@ -202,8 +202,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                     extrinsic=extrinsics,
                     # images=images,
                 )
-                # print("box_result",  len(box_result), len(box_result[0]), len(box_result[0][0])) 
-                # 4 3 1 100
+                
                 # predictions["box_result"] = box_result
                 predictions["pred_corners"] = all_corners
                 predictions["pred_logits"] = all_logits
