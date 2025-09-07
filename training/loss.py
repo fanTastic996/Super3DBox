@@ -8,12 +8,14 @@ import torch
 import torch.nn.functional as F
 
 from dataclasses import dataclass
-from vggt.utils.pose_enc import extri_intri_to_pose_encoding
+from vggt.utils.pose_enc import extri_intri_to_pose_encoding, pose_encoding_to_extri_intri
 from train_utils.general import check_and_fix_inf_nan
 from math import ceil, floor
 import torch
 from scipy.optimize import linear_sum_assignment
 from torch.nn.functional import l1_loss
+
+
 
 @dataclass(eq=False)
 class MultitaskLoss(torch.nn.Module):
@@ -75,8 +77,7 @@ class MultitaskLoss(torch.nn.Module):
         
         # if 'box_result' in predictions:
         if 'pred_corners' in predictions:
-            # print("world_points:", batch['world_points'].shape)
-            # print("bbox_corners:", batch['bbox_corners'].shape)
+              
             pred_corners = predictions['pred_corners']
             pred_logits = predictions['pred_logits']
             # box_loss_dict = compute_box_loss(box_predictions, batch)#, **self.box)   
@@ -845,7 +846,7 @@ def compute_box_logit_loss_single(
     # 6) 总损失
     loss = w_box * chamfer_loss_val + w_class * class_loss
     
-    return loss
+    return loss, w_box * chamfer_loss_val, w_class * class_loss
 
 def compute_box_loss(predictions, batch):
     
@@ -880,6 +881,8 @@ def compute_box_loss(predictions, batch):
 def compute_box_logit_loss(pred_corners, pred_logits, batch):
     
     total_loss = 0
+    total_chamfer_loss = 0
+    total_class_loss = 0
     N_seq = len(pred_corners)
     # calcudate loss for each sequence
     for i in range(N_seq):
@@ -895,13 +898,17 @@ def compute_box_logit_loss(pred_corners, pred_logits, batch):
 
         gt_box_corners = gt_box_corners_seq #gt_box_corners 
         
-        loss = compute_box_logit_loss_single(pred_box_corners, pred_box_logits, gt_box_corners, w_box=1.0, w_class=0.05)
+        loss, chamfer_loss_val, class_loss = compute_box_logit_loss_single(pred_box_corners, pred_box_logits, gt_box_corners, w_box=1.0, w_class=1.0) #w_class=0.05
         # loss = chamfer_loss(pred_box_corners, gt_box_corners) 
- 
-        total_loss += loss
 
+        total_loss += loss
+        total_chamfer_loss += chamfer_loss_val
+        total_class_loss += class_loss
+        
     loss_dict = {
         f"loss_box": total_loss,
+        f"loss_chamfer": total_chamfer_loss,
+        f"loss_class": total_class_loss,
     }
 
     return loss_dict

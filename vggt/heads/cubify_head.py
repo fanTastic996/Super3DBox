@@ -1018,13 +1018,22 @@ class EncoderProposals(Prompter):
         #       (which are needed for initialization of queries).
         return (encoder_proposals, instances)
 
+
+    #IMPORTANT
     def inference_single_image(self, output, image_size, topk):            
         class_prob = output.pred_logits.sigmoid() #将logits转为概率值 
 
         topk_values, topk_indexes = torch.topk(class_prob.view(-1), topk) # 取概率最高的topk个结果 sort过
 
-        class_scores = topk_values  # 预测置信度
-        topk_boxes = topk_indexes // class_prob.shape[-1] # 计算预测框索引
+        # class_scores = topk_values  # 预测置信度
+        # topk_boxes = topk_indexes // class_prob.shape[-1] # 计算预测框索引
+        
+        #TODO:changed 25-9-6-lyq
+        front_logits = class_prob[..., 1]
+        topk_scores, topk_boxes = torch.topk(front_logits.view(-1), topk)
+        
+        
+        
         labels = topk_indexes % class_prob.shape[-1] # 计算预测类别标签 
         
         #changed by lyq 25-4-29
@@ -1042,7 +1051,7 @@ class EncoderProposals(Prompter):
 
         result = Instances3D(image_size)
             
-        result.scores = class_scores
+        result.scores = topk_scores #class_scores
         result.pred_classes = labels
         result.pred_boxes = boxes
         result.pred_logits = output.pred_logits[topk_boxes]
@@ -1059,6 +1068,8 @@ class EncoderProposals(Prompter):
         
         return result
 
+
+    #IMPORTANT  
     def inference(self, prompt, output, sensor, topk):
         results = []
         
@@ -1509,6 +1520,7 @@ class CubifyHead(nn.Module):
         patch_start_idx,
         intrinsic=None,
         extrinsic=None,
+        gravity=None,
         do_preprocess: bool = True,  # 是否执行预处理（保留接口）
         do_postprocess: bool = True,  # 是否执行后处理（保留接口）
     ):        
@@ -1531,10 +1543,7 @@ class CubifyHead(nn.Module):
 
             
             if intrinsic is not None and extrinsic is not None:
-                image_info = ImageMeasurementInfo(
-                    size = (img_H, img_W),
-                    K = intrinsic[j,0].detach().cpu()
-                    [None])
+
                 sample["sensor_info"].wide.image = sample["sensor_info"].wide.image.resize((img_H, img_W))
                 # print("intrinsic[j,0].detach().cpu()[:3,:3]",intrinsic[j,0].detach().cpu()[:3,:3].shape,sample["sensor_info"].wide.image.K.shape)
                 sample["sensor_info"].wide.image.K[0,:3,:3]=intrinsic[j,0].detach().cpu()[:3,:3]
@@ -1548,9 +1557,7 @@ class CubifyHead(nn.Module):
             # sample["sensor_info"]的内参K，图像HW的shape，外参pose影响的T_gravity都会对结果产生影响，主要是decoder
             
             # GT T_gravity
-            sample["sensor_info"].wide.T_gravity = torch.tensor([[[ 0.9947,  0.0910, -0.0473],
-                            [-0.1025,  0.8826, -0.4588],
-                            [ 0.0000,  0.4612,  0.8873]]])
+            sample["sensor_info"].wide.T_gravity = gravity[j] #torch.tensor([[[ 0.9947,  0.0910, -0.0473],[-0.1025,  0.8826, -0.4588],[ 0.0000,  0.4612,  0.8873]]])
             
             packaged = self.augmentor.package(sample)
             device = self.pixel_mean
@@ -1558,7 +1565,7 @@ class CubifyHead(nn.Module):
             batched_sensors = self.preprocessor.preprocess([packaged])
             
             sensor = batched_sensors[self.sensor_name]   
-            if len(sensor['image'].data.tensor.shape)>4:
+            if len(sensor['image'].data.tensor.shape) > 4:
                 sensor['image'].data.tensor = sensor['image'].data.tensor.squeeze(0) 
 
             features = self.backbone(sensor)
@@ -1645,20 +1652,20 @@ class CubifyHead(nn.Module):
             #@!
             #TODO: not sure if it is working
             # if self.training:
-            all_corners.append(results[0].pred_boxes_3d.corners)
-            all_logits.append(results[0].pred_logits)
+            # all_corners.append(results[0].pred_boxes_3d.corners)
+            # all_logits.append(results[0].pred_logits)
             # else:
-            # all_results.append(results[0])
+            all_results.append(results[0])
 
             # print("debug:", results[0]) # scores pred_classes pred_boxes pred_logits pred_boxes_3d object_desc pred_proj_xy
             
-        # return all_results
-        return all_corners, all_logits
+        return all_results
+        # return all_corners, all_logits
 
 
-    def forward(self, batched_inputs, aggregated_tokens_list, patch_start_idx, intrinsic=None, extrinsic=None, do_postprocess=True):
+    def forward(self, batched_inputs, aggregated_tokens_list, patch_start_idx, intrinsic=None, extrinsic=None, gravity=None, do_postprocess=True):
         """训练/推理的统一入口（实际调用推理函数）"""
-        return self.inference(batched_inputs, aggregated_tokens_list, patch_start_idx, intrinsic=intrinsic, extrinsic=extrinsic)
+        return self.inference(batched_inputs, aggregated_tokens_list, patch_start_idx, intrinsic=intrinsic, extrinsic=extrinsic, gravity=gravity)
 
     def extract_image_vggt_embeds_3d(
         self,

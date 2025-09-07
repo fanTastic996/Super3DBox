@@ -4,7 +4,7 @@
 CUDA_VISIBLE_DEVICES=1 torchrun --nproc_per_node=1 launch.py
 
 cd training
-torchrun --nproc_per_node=4 launch.py
+torchrun --nproc_per_node=2 launch.py
 
 tensorboard --logdir=./logs --port=6006
 

@@ -14,15 +14,18 @@ from vggt.heads.dpt_head import DPTHead
 from vggt.heads.track_head import TrackHead
 from vggt.heads.cubify_head import CubifyHead
 from vggt.heads.vggt_cubify_model import *
+# from vggt.heads.cubify_head import *
+from vggt.utils.pose_enc import extri_intri_to_pose_encoding, pose_encoding_to_extri_intri, gravity_encoding_to_extri_intri
 
 class VGGT(nn.Module, PyTorchModelHubMixin):
     def __init__(self, img_size=518, patch_size=14, embed_dim=1024,
-                 enable_camera=True, enable_point=True, enable_depth=True, enable_track=True, enable_cubify=True):
+                 enable_camera=True, enable_gravity=True, enable_point=True, enable_depth=True, enable_track=True, enable_cubify=True):
         super().__init__()
 
         self.aggregator = Aggregator(img_size=img_size, patch_size=patch_size, embed_dim=embed_dim)
 
         self.camera_head = CameraHead(dim_in=2 * embed_dim) if enable_camera else None
+        self.gravity_head = CameraHead(dim_in=2 * embed_dim) if enable_gravity else None
         self.point_head = DPTHead(dim_in=2 * embed_dim, output_dim=4, activation="inv_log", conf_activation="expp1") if enable_point else None
         self.depth_head = DPTHead(dim_in=2 * embed_dim, output_dim=2, activation="exp", conf_activation="expp1") if enable_depth else None
         self.track_head = TrackHead(dim_in=2 * embed_dim, patch_size=patch_size) if enable_track else None
@@ -176,6 +179,11 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                 pose_enc_list = self.camera_head(aggregated_tokens_list)
                 predictions["pose_enc"] = pose_enc_list[-1]  # pose encoding of the last iteration
                 predictions["pose_enc_list"] = pose_enc_list
+            
+            if self.gravity_head is not None:
+                gravity_enc_list = self.gravity_head(aggregated_tokens_list)
+                predictions["gravity_enc"] = gravity_enc_list[-1]  # pose encoding of the last iteration
+                predictions["gravity_enc_list"] = gravity_enc_list
                 
             if self.depth_head is not None:
                 depth, depth_conf = self.depth_head(
@@ -192,20 +200,27 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                 predictions["world_points_conf"] = pts3d_conf
 
             if self.box_head is not None:
+                
+                # extract ex and in trinsics [B, N, 3, 4/3]
+                extrinsic, intrinsic = pose_encoding_to_extri_intri(predictions["pose_enc"], images.shape[-2:])
+                gravity_init, _ = gravity_encoding_to_extri_intri(predictions["gravity_enc"], images.shape[-2:]) #[B,1,3,4]
+                gravity = gravity_init[:,:,:3,:3] #[B,1,3,3]
+                
                 # print("input",images.shape) #([4, 3, 3, 476, 518])
-                # box_result = self.box_head(
-                all_corners, all_logits = self.box_head(
+                box_result = self.box_head(
+                # all_corners, all_logits = self.box_head(
                     images,
                     aggregated_tokens_list,
                     patch_start_idx,
-                    intrinsic=intrinsics,
-                    extrinsic=extrinsics,
+                    intrinsic=intrinsic,
+                    extrinsic=extrinsic,
+                    gravity=gravity
                     # images=images,
                 )
                 
-                # predictions["box_result"] = box_result
-                predictions["pred_corners"] = all_corners
-                predictions["pred_logits"] = all_logits
+                predictions["box_result"] = box_result
+                # predictions["pred_corners"] = all_corners
+                # predictions["pred_logits"] = all_logits
                 
         if self.track_head is not None and query_points is not None:
             track_list, vis, conf = self.track_head(

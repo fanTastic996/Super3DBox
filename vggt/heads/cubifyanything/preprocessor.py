@@ -55,7 +55,8 @@ class Augmentor(object):
                 continue
 
             sensor_result = {}
-            sensor_info = copy.deepcopy(getattr(sample["sensor_info"], sensor_name))
+            # sensor_info = copy.deepcopy(getattr(sample["sensor_info"], sensor_name))
+            sensor_info = getattr(sample["sensor_info"], sensor_name)
             for measurement_name, measurement in sensor_data.items():
                 measurement_key = os.path.join(sensor_name, measurement_name)
                 if (self.measurement_keys is not None) and (measurement_key not in self.measurement_keys):

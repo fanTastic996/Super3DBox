@@ -950,8 +950,13 @@ class EncoderProposals(Prompter):
         class_prob = output.pred_logits.sigmoid()
         topk_values, topk_indexes = torch.topk(class_prob.view(-1), topk)
 
-        class_scores = topk_values
-        topk_boxes = topk_indexes // class_prob.shape[-1]
+        # class_scores = topk_values
+        # topk_boxes = topk_indexes // class_prob.shape[-1]
+        
+        #TODO:changed 25-9-6-lyq
+        front_logits = class_prob[..., 1]
+        topk_scores, topk_boxes = torch.topk(front_logits.view(-1), topk)
+        
         labels = topk_indexes % class_prob.shape[-1]
         
         #changed by lyq 25-4-29
@@ -968,8 +973,9 @@ class EncoderProposals(Prompter):
 
 
         result = Instances3D(image_size)
-            
-        result.scores = class_scores
+        
+        
+        result.scores = topk_scores #class_scores
         result.pred_classes = labels
         result.pred_boxes = boxes
         result.pred_logits = output.pred_logits[topk_boxes]

@@ -5,6 +5,8 @@ from visual_util import segment_sky, download_file_from_url
 from vggt.utils.geometry import closed_form_inverse_se3, unproject_depth_map_to_point_map
 from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 import pickle
+import os
+from PIL import Image
 
 
 
@@ -14,7 +16,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
 
 
-model = VGGT(enable_camera=True, enable_point=False, enable_depth=False, enable_track=False, enable_cubify=True)
+model = VGGT(enable_camera=True, enable_gravity=True, enable_point=False, enable_depth=False, enable_track=False, enable_cubify=True)
 _URL = "/home/lanyuqing/myproject/vggt/training/logs/exp001/ckpts/checkpoint.pt"
 model_dict= torch.load(_URL)
 model.load_state_dict(model_dict["model"])
@@ -38,6 +40,7 @@ with torch.no_grad():
     with torch.cuda.amp.autocast(dtype=dtype):
         # Predict attributes including cameras, depth maps, and point maps.
         predictions = model(images)
+        
         print("predictions", predictions.keys())
         
         print("Converting pose encoding to extrinsic and intrinsic matrices...")
@@ -61,10 +64,10 @@ with torch.no_grad():
         }
         
         valid_mask = pred_3d_boxes.scores.cpu().numpy()>=0.0
-        print("center", bboxes_3d.gravity_center.cpu().numpy()[valid_mask])
-        print("size", bboxes_3d.dims.cpu().numpy()[valid_mask])
-        print("R", bboxes_3d.R.cpu().numpy()[valid_mask])
-        
+        # print("center", bboxes_3d.gravity_center.cpu().numpy()[valid_mask])
+        # print("size", bboxes_3d.dims.cpu().numpy()[valid_mask])
+        # print("R", bboxes_3d.R.cpu().numpy()[valid_mask])
+        print("scores", pred_3d_boxes.scores.cpu().numpy()[valid_mask])
         # print(boxes_3d.R.cpu().numpy().shape,poses.shape)
         print("Saving predictions...")
         # 保存到文件

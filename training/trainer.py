@@ -155,9 +155,10 @@ class Trainer:
         if self.mode != "val":
             self.optims = construct_optimizers(self.model, self.optim_conf)
 
-        # Load checkpoint if available or specified
+        # Load checkpoint if available or specified directly load all weights
         if self.checkpoint_conf.resume_checkpoint_path is not None:
             self._load_resuming_checkpoint_mine(self.checkpoint_conf.resume_checkpoint_path, self.checkpoint_conf.cubify_checkpoint_path)
+        
         else:   
             ckpt_path = get_resume_checkpoint(self.checkpoint_conf.save_dir)
             if ckpt_path is not None:
@@ -215,11 +216,14 @@ class Trainer:
         # Load optimizer state if available and in training mode
         if "optimizer" in checkpoint:
             logging.info(f"Loading optimizer state dict (rank {self.rank})")
-            self.optims.optimizer.load_state_dict(checkpoint["optimizer"])
+            self.optims[0].optimizer.load_state_dict(checkpoint["optimizer"])
 
-        # Load training progress
-        if "epoch" in checkpoint:
-            self.epoch = checkpoint["epoch"]
+        # Load training progress prev_epoch
+        # if "epoch" in checkpoint:
+        if "prev_epoch" in checkpoint:
+            self.epoch = checkpoint["prev_epoch"]
+            logging.info(f"Loading epoch start (epoch: {self.epoch})")
+            
         self.steps = checkpoint["steps"] if "steps" in checkpoint else {"train": 0, "val": 0}
         self.ckpt_time_elapsed = checkpoint.get("time_elapsed", 0)
 
@@ -278,6 +282,7 @@ class Trainer:
         # if load_cubify:
         self.model.box_head.load_state_dict(filtered_dict, strict=False)  # strict=False 允许部分加载
     
+   
     def _setup_device(self, device: str):
         """Sets up the device for training (CPU or CUDA)."""
         self.local_rank, self.distributed_rank = get_machine_local_and_dist_rank()
@@ -437,6 +442,7 @@ class Trainer:
             #save checkpoint first
             # self.save_checkpoint(self.epoch)
             # print("save checkpoint first!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            # exit(0)
             
             dataloader = self.train_dataset.get_loader(epoch=int(self.epoch))
             self.train_epoch(dataloader)
@@ -452,8 +458,10 @@ class Trainer:
 
             # Run validation at the specified frequency
             # Skips validation after the last training epoch, as it can be run separately.
-            if self.epoch % self.val_epoch_freq == 0 and self.epoch < self.max_epochs - 1:
-                self.run_val()
+            
+            # TODO: note this val step, since we aim to overfit the small training sets.
+            # if self.epoch % self.val_epoch_freq == 0 and self.epoch < self.max_epochs - 1:
+            #     self.run_val()
             
             self.epoch += 1
         
@@ -803,7 +811,7 @@ class Trainer:
                 depths=batch["depths"],
                 point_masks=batch["point_masks"],
                 bbox_corners=batch["bbox_corners"],
-                scale_by_points=False
+                scale_by_points=False #False
             )
 
         # Replace the original values in the batch with the normalized ones.
