@@ -1194,6 +1194,273 @@ def make_vggt():
 
     return vggt
 
+class LightweightCrossViewFusion(nn.Module):
+    """
+    轻量级跨视角融合模块
+    计算量更小，适合资源受限的情况
+    """
+    def __init__(self, feat_dim=256, num_heads=4, dropout=0.1):
+        super().__init__()
+        self.feat_dim = feat_dim
+        self.num_heads = num_heads
+        
+        # 简化的view embedding
+        self.view_proj = nn.Linear(feat_dim, feat_dim)
+        self.pos_proj = nn.Linear(feat_dim, feat_dim)
+        
+        # 单层注意力
+        self.cross_attention = nn.MultiheadAttention(
+            embed_dim=feat_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            batch_first=True
+        )
+        
+        # 权重门控
+        self.gate = nn.Sequential(
+            nn.Linear(feat_dim, feat_dim // 4),
+            nn.ReLU(),
+            nn.Linear(feat_dim // 4, 1),
+            nn.Sigmoid()
+        )
+        
+        self.norm = nn.LayerNorm(feat_dim)
+    
+    def forward(self, features):
+        """
+        Args:
+            features: [N, 1024, 256]
+        Returns:
+            fused: [1, 1024, 256]
+        """
+        N, L, C = features.shape
+        
+        # 展平并添加view信息
+        view_ids = torch.arange(N, device=features.device).float().unsqueeze(-1) / N
+        view_info = self.view_proj(view_ids.unsqueeze(-1).expand(-1, -1, C))  # [N, 1, C]
+        view_features = features + view_info.expand(-1, L, -1)  # [N, L, C]
+        
+        # 重新排列为 [L, N, C] 便于位置级注意力
+        tokens = view_features.permute(1, 0, 2)  # [L, N, C]
+        
+        # 每个位置独立进行跨视角注意力
+        fused_tokens = []
+        for pos in range(L):
+            pos_tokens = tokens[pos:pos+1]  # [1, N, C]
+            attended, _ = self.cross_attention(pos_tokens, pos_tokens, pos_tokens)
+            
+            # 加权聚合
+            weights = self.gate(attended)  # [1, N, 1]
+            weights = F.softmax(weights.squeeze(-1), dim=-1)  # [1, N]
+            aggregated = (attended * weights.unsqueeze(-1)).sum(dim=1, keepdim=True)  # [1, 1, C]
+            fused_tokens.append(aggregated)
+        
+        fused = torch.cat(fused_tokens, dim=1)  # [1, L, C]
+        fused = self.norm(fused)
+        
+        return fused
+
+class CrossViewSelfAttentionFusion(nn.Module):
+    """
+    Cross-View Self-Attention特征融合模块
+    将多视角特征展平为token序列，附加view embedding，通过transformer融合
+    
+    输入: [N, 1024, 256] - N个视角的特征
+    输出: [1, 1024, 256] - 融合后的全景特征
+    """
+    def __init__(self, 
+                 feat_dim=256, 
+                 num_heads=8, 
+                 num_layers=3,
+                 dropout=0.1,
+                 use_pos_embed=True):
+        super().__init__()
+        self.feat_dim = feat_dim
+        self.num_heads = num_heads
+        self.num_layers = num_layers
+        self.use_pos_embed = use_pos_embed
+        
+        # View Embedding - 为每个视角学习可区分的embedding
+        self.max_views = 16  # 支持最大视角数
+        self.view_embedding = nn.Embedding(self.max_views, feat_dim)
+        
+        # Position Embedding - 为每个token位置学习位置编码
+        if self.use_pos_embed:
+            self.position_embedding = nn.Embedding(1024, feat_dim)  # 假设最大1024个token
+        
+        # Multi-layer Transformer Encoder
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=feat_dim,
+            nhead=num_heads,
+            dim_feedforward=feat_dim * 4,
+            dropout=dropout,
+            activation='gelu',
+            batch_first=True,
+            norm_first=True  # Pre-norm结构，更稳定
+        )
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer, 
+            num_layers=num_layers,
+            norm=nn.LayerNorm(feat_dim)
+        )
+        
+        # View-wise attention pooling
+        self.view_attention = nn.MultiheadAttention(
+            embed_dim=feat_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            batch_first=True
+        )
+        
+        # 可学习的全局query用于跨视角聚合
+        self.global_query = nn.Parameter(torch.randn(1, 1024, feat_dim))
+        
+        # 输出投影层
+        self.output_proj = nn.Sequential(
+            nn.Linear(feat_dim, feat_dim),
+            nn.LayerNorm(feat_dim),
+            nn.GELU(),
+            nn.Linear(feat_dim, feat_dim)
+        )
+        
+        # 残差权重
+        self.residual_weight = nn.Parameter(torch.tensor(0.1))
+        
+        self._init_weights()
+    
+    def _init_weights(self):
+        """初始化模型权重"""
+        # Xavier初始化
+        nn.init.xavier_uniform_(self.global_query)
+        nn.init.xavier_uniform_(self.view_embedding.weight)
+        if self.use_pos_embed:
+            nn.init.xavier_uniform_(self.position_embedding.weight)
+        
+        # 输出投影层初始化
+        for module in self.output_proj:
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                nn.init.constant_(module.bias, 0)
+    
+    def add_embeddings(self, features):
+        """
+        为特征添加view embedding和position embedding
+        Args:
+            features: [N, L, C] - N个视角，每个视角L个token
+        Returns:
+            embedded_features: [N*L, C] - 添加embedding后的特征
+            attention_mask: [N*L] - 注意力掩码
+        """
+        N, L, C = features.shape
+        device = features.device
+        
+        # 1. View Embedding - 每个视角的所有token共享同一个view embedding
+        view_ids = torch.arange(N, device=device)  # [N]
+        view_embeds = self.view_embedding(view_ids)  # [N, C]
+        view_embeds = view_embeds.unsqueeze(1).expand(-1, L, -1)  # [N, L, C]
+        
+        # 2. Position Embedding - 每个token位置的embedding
+        if self.use_pos_embed:
+            pos_ids = torch.arange(L, device=device)  # [L]
+            pos_embeds = self.position_embedding(pos_ids)  # [L, C]
+            pos_embeds = pos_embeds.unsqueeze(0).expand(N, -1, -1)  # [N, L, C]
+        else:
+            pos_embeds = 0
+        
+        # 3. 组合所有embedding
+        embedded_features = features + view_embeds + pos_embeds  # [N, L, C]
+        
+        # 4. 展平为token序列
+        embedded_features = embedded_features.view(N * L, C)  # [N*L, C]
+        
+        # 5. 创建attention mask (所有token都参与注意力)
+        attention_mask = torch.zeros(N * L, dtype=torch.bool, device=device)
+        
+        return embedded_features, attention_mask
+    
+    def cross_view_attention(self, embedded_tokens):
+        """
+        跨视角自注意力计算
+        Args:
+            embedded_tokens: [1, N*L, C] - 展平的token序列
+        Returns:
+            attended_tokens: [1, N*L, C] - 注意力后的特征
+        """
+        # 通过transformer进行跨视角和跨位置的注意力计算
+        attended_tokens = self.transformer(embedded_tokens)  # [1, N*L, C]
+        return attended_tokens
+    
+    def aggregate_views(self, attended_tokens, N, L):
+        """
+        将跨视角注意力后的token聚合为单一视角
+        Args:
+            attended_tokens: [1, N*L, C] - 注意力后的token
+            N: 视角数
+            L: 每个视角的token数
+        Returns:
+            aggregated: [1, L, C] - 聚合后的单视角特征
+        """
+        # 重新组织为 [N, L, C] 形状
+        tokens_reshaped = attended_tokens.view(1, N, L, -1)  # [1, N, L, C]
+        tokens_reshaped = tokens_reshaped.squeeze(0)  # [N, L, C]
+        
+        # 使用可学习的全局query进行view-wise聚合
+        global_query = self.global_query.expand(1, -1, -1)  # [1, L, C]
+        
+        # 将所有视角的对应位置token作为key/value
+        # 重新排列：[N, L, C] -> [L, N, C] -> [L*N, C] -> [1, L*N, C]
+        kv_tokens = tokens_reshaped.permute(1, 0, 2).contiguous()  # [L, N, C]
+        kv_tokens = kv_tokens.view(L * N, -1).unsqueeze(0)  # [1, L*N, C]
+        
+        # 对每个位置聚合不同视角的信息
+        aggregated_list = []
+        for pos in range(L):
+            # 提取位置pos处所有视角的token
+            pos_tokens = tokens_reshaped[:, pos:pos+1, :].transpose(0, 1)  # [1, N, C]
+            pos_query = global_query[:, pos:pos+1, :]  # [1, 1, C]
+            
+            # 注意力聚合
+            aggregated_pos, _ = self.view_attention(
+                query=pos_query,      # [1, 1, C]
+                key=pos_tokens,       # [1, N, C]  
+                value=pos_tokens      # [1, N, C]
+            )
+            aggregated_list.append(aggregated_pos)
+        
+        # 拼接所有位置的聚合结果
+        aggregated = torch.cat(aggregated_list, dim=1)  # [1, L, C]
+        
+        return aggregated
+    
+    def forward(self, features):
+        """
+        前向传播
+        Args:
+            features: [N, 1024, 256] - 多视角特征
+        Returns:
+            fused_features: [1, 1024, 256] - 融合后的特征
+        """
+        N, L, C = features.shape
+        device = features.device
+        
+        # 1. 添加view和position embedding
+        embedded_tokens, attention_mask = self.add_embeddings(features)  # [N*L, C]
+        embedded_tokens = embedded_tokens.unsqueeze(0)  # [1, N*L, C]
+        
+        # 2. 跨视角自注意力
+        attended_tokens = self.cross_view_attention(embedded_tokens)  # [1, N*L, C]
+        
+        # 3. 聚合多视角为单视角
+        aggregated_features = self.aggregate_views(attended_tokens, N, L)  # [1, L, C]
+        
+        # 4. 输出投影
+        fused_features = self.output_proj(aggregated_features)  # [1, L, C]
+        
+        # 5. 残差连接到平均特征（提升稳定性）
+        mean_features = features.mean(dim=0, keepdim=True)  # [1, L, C]
+        final_features = fused_features + self.residual_weight * mean_features
+        
+        return final_features
 
 
 class AttentionFusionWithTorch(nn.Module):

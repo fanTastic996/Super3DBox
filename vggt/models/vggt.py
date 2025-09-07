@@ -134,6 +134,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                         spatial_merge_size=2 #config.vision_config.spatial_merge_size, # 2
                     ),
             # frame_merger=AttentionFusionWithTorch(embed_dim=256, num_heads=8),
+            # frame_merger=LightweightCrossViewFusion(feat_dim=256),
             pixel_mean=[123.675, 116.28, 103.53],
             pixel_std=[58.395, 57.12, 57.375]) if enable_cubify else None
         
