@@ -183,7 +183,7 @@ class BaseDataset(Dataset):
 
         # Handle landscape vs. portrait orientation
         rotate_to_portrait = False
-        if self.landscape_check:
+        if self.landscape_check: #False
             # Switch between landscape and portrait if necessary
             if original_size[0] > 1.25 * original_size[1]:
                 if (target_image_shape[0] != target_image_shape[1]) and (np.random.rand() > 0.5):
@@ -191,7 +191,7 @@ class BaseDataset(Dataset):
                     rotate_to_portrait = True
 
         # Resize images and update intrinsics
-        if self.rescale:
+        if self.rescale: #True
             image, depth_map, intri_opencv, track = resize_image_depth_and_intrinsic(
                 image, depth_map, intri_opencv, target_shape, original_size, track=track,
                 safe_bound=safe_bound,
@@ -206,7 +206,7 @@ class BaseDataset(Dataset):
         )
 
         # Apply 90-degree rotation if needed
-        if rotate_to_portrait:
+        if rotate_to_portrait: #False
             assert self.landscape_check
             clockwise = np.random.rand() > 0.5
             image, depth_map, extri_opencv, intri_opencv, track = rotate_90_degrees(

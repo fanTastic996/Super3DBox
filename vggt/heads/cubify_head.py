@@ -1557,7 +1557,8 @@ class CubifyHead(nn.Module):
             # sample["sensor_info"]的内参K，图像HW的shape，外参pose影响的T_gravity都会对结果产生影响，主要是decoder
             
             # GT T_gravity
-            sample["sensor_info"].wide.T_gravity = gravity[j] #torch.tensor([[[ 0.9947,  0.0910, -0.0473],[-0.1025,  0.8826, -0.4588],[ 0.0000,  0.4612,  0.8873]]])
+            sample["sensor_info"].wide.T_gravity = gravity[j]
+            # sample["sensor_info"].wide.T_gravity = torch.tensor([[[ 0.9947,  0.0910, -0.0473],[-0.1025,  0.8826, -0.4588],[ 0.0000,  0.4612,  0.8873]]])
             
             packaged = self.augmentor.package(sample)
             device = self.pixel_mean
@@ -1601,7 +1602,12 @@ class CubifyHead(nn.Module):
 
             # fuse multiframe features
             # fused_features = self.frame_merger(multiframe_fused_features)  # [1*N, 1024, 256] -> [1, 1024, 256]
-            fused_features = torch.mean(multiframe_fused_features, dim=0, keepdim=True)  # [N, 1024, 256] -> [1, 1024, 256] N=image_num
+            # fused_features = torch.mean(multiframe_fused_features, dim=0, keepdim=True)  # [N, 1024, 256] -> [1, 1024, 256] N=image_num
+            
+            fused_features = multiframe_fused_features.reshape(1, -1, 256)  #[1, N*single_img_token, 256]
+            spatial_shapes[0, 1] = spatial_shapes[0, 1] * multiframe_fused_features.shape[0]
+            lvl_pos_embed = lvl_pos_embed.repeat(1, multiframe_fused_features.shape[0], 1)
+            
             
             # 4. 生成提示（Prompt）
             '''
@@ -1609,9 +1615,11 @@ class CubifyHead(nn.Module):
             '''
             # Mask_flatten 标识特征图中哪些位置是有效数据（非填充区域）与src_flatten相对应
             # valid_ratios ​有效图像区域相对于填充后图像尺寸的比例
-            valid_ratios = valid_ratios[:1] # [1,1,2]
-            mask_flatten = mask_flatten[:1] # [1, 1024]
-
+            
+            # valid_ratios = valid_ratios[:1] # [1,1,2]
+            # mask_flatten = mask_flatten[:1] # [1, 1024]
+            mask_flatten = mask_flatten.reshape(1, -1)
+            
             prompts = self.prompting.get_image_prompts(
                 fused_features, mask_flatten, spatial_shapes, sensor
             )  #modules objects
@@ -1652,15 +1660,15 @@ class CubifyHead(nn.Module):
             #@!
             #TODO: not sure if it is working
             # if self.training:
-            # all_corners.append(results[0].pred_boxes_3d.corners)
-            # all_logits.append(results[0].pred_logits)
+            all_corners.append(results[0].pred_boxes_3d.corners)
+            all_logits.append(results[0].pred_logits)
             # else:
-            all_results.append(results[0])
+            # all_results.append(results[0])
 
             # print("debug:", results[0]) # scores pred_classes pred_boxes pred_logits pred_boxes_3d object_desc pred_proj_xy
             
-        return all_results
-        # return all_corners, all_logits
+        # return all_results
+        return all_corners, all_logits
 
 
     def forward(self, batched_inputs, aggregated_tokens_list, patch_start_idx, intrinsic=None, extrinsic=None, gravity=None, do_postprocess=True):

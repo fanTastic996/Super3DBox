@@ -148,9 +148,9 @@ class CA1MDataset(BaseDataset):
             seq_name = self.sequence_list[seq_index]
         # 如果没有提供特定ID，则随机选择图像
         if ids is None:
-            # ids = np.random.choice(
-            #     self.data_store[seq_name], img_per_seq, replace=self.allow_duplicate_img
-            # )
+            ids = np.random.choice(
+                self.data_store[seq_name], img_per_seq, replace=self.allow_duplicate_img
+            )
             ids = np.array([180,200])
             
         image_idxs = ids  # 获取图像ID
@@ -165,6 +165,10 @@ class CA1MDataset(BaseDataset):
         # Load Box GT information
         filtered_bbox_corners = self.filter_gt_boxes_for_images(scene_data, image_idxs)
 
+        #TODO: test difficult boxes
+        # cidx = [2, 4, 6, 13]
+        # filtered_bbox_corners = filtered_bbox_corners[cidx]
+        
         if isinstance(filtered_bbox_corners, tuple):
             print(f"No valid GT boxes found for seq {seq_name} with image ids {ids}. using fake GT...")
             filtered_bbox_corners = np.zeros((1, 8, 3), dtype=np.float32)  # 使用空的GT boxes
@@ -193,7 +197,7 @@ class CA1MDataset(BaseDataset):
         seq_poses = closed_form_inverse_se3(seq_poses).reshape(-1, 4, 4)
         
         
-        K_rgb = scene_data['K_rgb']
+        K_rgb = scene_data['K'] #scene_data['K_rgb']
          
         for img_idx in image_idxs:
             
@@ -225,6 +229,12 @@ class CA1MDataset(BaseDataset):
                 depth_map = None # 不加载深度图
             # 获取原始尺寸
             original_size = np.array(image.shape[:2])
+            # rescale RGB image to the same size of depth map
+            if original_size[0] != depth_map.shape[0] or original_size[1] != depth_map.shape[1]:
+                image = cv2.resize(image, (depth_map.shape[1], depth_map.shape[0]), interpolation=cv2.INTER_AREA)
+                original_size = np.array(image.shape[:2])
+            
+            
             # 获取外参和内参矩阵
             cur_pose = seq_poses[img_idx] # [4,4]
             extri_opencv = cur_pose[:3,:] #np.array(anno["extri"])
@@ -336,6 +346,8 @@ class CA1MDataset(BaseDataset):
 
         # 验证并提取有效的corners数据
         corners_array, valid_instances = self.validate_and_extract_corners(instances_data)
+        
+        
 
         # 加载相机参数和poses
         K = np.loadtxt(os.path.join(scene_path, 'K_depth.txt')).reshape(3, 3)

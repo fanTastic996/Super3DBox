@@ -208,8 +208,8 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                 gravity = gravity_init[:,:,:3,:3] #[B,1,3,3]
                 
                 # print("input",images.shape) #([4, 3, 3, 476, 518])
-                box_result = self.box_head(
-                # all_corners, all_logits = self.box_head(
+                # box_result = self.box_head(
+                all_corners, all_logits = self.box_head(
                     images,
                     aggregated_tokens_list,
                     patch_start_idx,
@@ -219,9 +219,9 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                     # images=images,
                 )
                 
-                predictions["box_result"] = box_result
-                # predictions["pred_corners"] = all_corners
-                # predictions["pred_logits"] = all_logits
+                # predictions["box_result"] = box_result
+                predictions["pred_corners"] = all_corners
+                predictions["pred_logits"] = all_logits
                 
         if self.track_head is not None and query_points is not None:
             track_list, vis, conf = self.track_head(
