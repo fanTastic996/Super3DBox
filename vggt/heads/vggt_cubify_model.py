@@ -1710,6 +1710,70 @@ class FeatureFusionModule_v2(nn.Module):
     # # 特征融合
     # fused_features = fusion_module(features_A, image_embeds_3d)
     # print(f"输出尺寸: {fused_features.shape}")  # torch.Size([1596, 2048])
+  
+class FeatureFusionModule_v3(nn.Module):
+    def __init__(self, d_clip, d_spatial_encoder, d_attn, num_heads):
+        super(FeatureFusionModule_v3, self).__init__()
+        
+        # pre-norm
+        self.clip_norm = nn.LayerNorm(d_clip)
+        self.spatial_encoder_norm = nn.LayerNorm(d_spatial_encoder)
+        
+        # projection
+        self.clip_query_proj = nn.Linear(d_clip, d_attn)
+        self.spatial_encoder_key_proj = nn.Linear(d_spatial_encoder, d_attn)
+        self.spatial_encoder_value_proj = nn.Linear(d_spatial_encoder, d_attn)
+        
+        # cross attention
+        self.cross_attention = nn.MultiheadAttention(embed_dim=d_attn, num_heads=num_heads, batch_first=True)
+        
+        # post-norm
+        self.out_norm = nn.LayerNorm(d_attn)
+        
+        # projection
+        self.out_proj = nn.Linear(d_attn, d_clip)
+        
+        # dropout
+        self.dropout = nn.Dropout(0.1)
+
+    def forward(self, clip_features, spatial_encoder_features):
+        """
+        Args:
+            clip_features: [B, N, D_clip]
+            spatial_encoder_features: [B, N, D_spatial_encoder]
+        Returns:
+            fused_features: [B, N, D_clip]
+        """
+        # 1. Pre-Norm 首先对两种输入特征分别进行层归一化。
+        clip_features_norm = self.clip_norm(clip_features)  # [B, N, D_clip]
+        spatial_encoder_features_norm = self.spatial_encoder_norm(spatial_encoder_features)  # [B, N, D_spatial_encoder]
+        
+        # 2. Projection 将归一化后的特征投影到相同的注意力维度d_attn。
+        clip_query_proj = self.clip_query_proj(clip_features_norm)  # [B, N, D_attn]
+        spatial_encoder_key_proj = self.spatial_encoder_key_proj(spatial_encoder_features_norm)  # [B, N, D_attn]
+        spatial_encoder_value_proj = self.spatial_encoder_value_proj(spatial_encoder_features_norm)  # [B, N, D_attn]
+        
+        # 3. Cross-Attention 核心计算：使用CLIP的Query去查询空间编码器的Key和Value。
+        fused_features, attn_weights = self.cross_attention(
+            query=clip_query_proj,
+            key=spatial_encoder_key_proj,
+            value=spatial_encoder_value_proj
+        )
+        # fused_features形状: [B, N, D_attn]
+        # attn_weights形状: [B, num_heads, N_query (来自CLIP), N_key (来自空间编码器)]，表示注意力分配权重
+        
+        # 4. Output Projection 将融合后的特征从d_attn维度投影回CLIP特征的原始维度d_clip。
+        fused_features = self.out_proj(fused_features)   # [B, N_clip, D_clip]
+        
+        # 5. Residual Connection and Dropout 残差连接与Dropout。
+        fused_features = self.out_norm(fused_features) # 对输出进行层归一化
+        fused_features = fused_features + clip_features  # 残差连接：将融合后的特征与原始的CLIP特征相加。这有助于梯度流动和保留原始信息。
+        # print(f'status_of_fused_features: max:{fused_features.max():.2f}, min:{fused_features.min():.2f}, mean:{fused_features.mean():.2f}, std:{fused_features.std():.2f}')
+        # print(f'status_of_clip_features: max:{clip_features.max():.2f}, min:{clip_features.min():.2f}, mean:{clip_features.mean():.2f}, std:{clip_features.std():.2f}')
+        fused_features = self.dropout(fused_features) # 最后应用Dropout
+        
+        return fused_features #, attn_weights # 返回融合后的特征和注意力权重
+  
     
 
 

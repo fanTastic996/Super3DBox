@@ -239,14 +239,7 @@ class CA1MDataset(BaseDataset):
             cur_pose = seq_poses[img_idx] # [4,4]
             extri_opencv = cur_pose[:3,:] #np.array(anno["extri"])
             intri_opencv = K_rgb #np.array(anno["intri"])
-            # # 处理单张图像
-            # print(filepath,"image", image.shape)
-            # print(filepath,"depth_map",depth_map.shape)
-            # print(filepath,"extri_opencv",extri_opencv.shape)
-            # print(filepath,"intri_opencv",intri_opencv)
-            # print(filepath,"original_size",original_size)
-            # print(filepath,"target_image_shape",target_image_shape)
-            # print(filepath,"aspect_ratio",aspect_ratio)
+            
             (
                 image,
                 depth_map,

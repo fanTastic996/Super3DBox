@@ -49,25 +49,32 @@ with torch.no_grad():
         predictions["intrinsic"] = intrinsic
         print('extrinsic',extrinsic.shape, extrinsic)
         print('intrinsic',intrinsic.shape, intrinsic)
-        pred_3d_boxes = predictions['box_result'][0]
+        # pred_3d_boxes = predictions['box_result'][0]
   
         
         save_dict = {}
         save_dict["extrinsic"] = predictions["extrinsic"].cpu().numpy()
         save_dict["intrinsic"] = predictions["intrinsic"].cpu().numpy()
-        bboxes_3d = pred_3d_boxes.pred_boxes_3d
+        # bboxes_3d = pred_3d_boxes.pred_boxes_3d
+        # save_dict["box_result"] = {
+        #     "scores": pred_3d_boxes.scores.cpu().numpy(),
+        #     "R": bboxes_3d.R.cpu().numpy(),
+        #     "center": bboxes_3d.gravity_center.cpu().numpy(),
+        #     "size": bboxes_3d.dims.cpu().numpy(),
+        # }
+        
         save_dict["box_result"] = {
-            "scores": pred_3d_boxes.scores.cpu().numpy(),
-            "R": bboxes_3d.R.cpu().numpy(),
-            "center": bboxes_3d.gravity_center.cpu().numpy(),
-            "size": bboxes_3d.dims.cpu().numpy(),
+            "scores":  predictions['pred_scores'][0].cpu().numpy(),
+            "R": predictions['pred_R'][0].cpu().numpy(),
+            "center": predictions['pred_center'][0].cpu().numpy(),
+            "size": predictions['pred_size'][0].cpu().numpy(),
         }
         
-        valid_mask = pred_3d_boxes.scores.cpu().numpy()>=0.0
+        # valid_mask = pred_3d_boxes.scores.cpu().numpy()>=0.0
         # print("center", bboxes_3d.gravity_center.cpu().numpy()[valid_mask])
         # print("size", bboxes_3d.dims.cpu().numpy()[valid_mask])
         # print("R", bboxes_3d.R.cpu().numpy()[valid_mask])
-        print("scores", pred_3d_boxes.scores.cpu().numpy()[valid_mask])
+        # print("scores", pred_3d_boxes.scores.cpu().numpy()[valid_mask])
         # print(boxes_3d.R.cpu().numpy().shape,poses.shape)
         print("Saving predictions...")
         # 保存到文件

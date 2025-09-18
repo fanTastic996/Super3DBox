@@ -19,3 +19,10 @@ tensorboard --logdir=
 可视化load数据代码:
 cd test
 python vis_datasets.py --scene_id 42897951 --frame_ids 236,487,713
+
+
+918-0031:
+save the v3 model, can retrain if need
+
+918-0035:
+start training using the new fusion module

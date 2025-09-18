@@ -855,8 +855,8 @@ class Trainer:
         # print("batch keys",batch.keys()) # dict_keys(['seq_name', 'ids', 'images', 'depths', 'extrinsics', 'intrinsics', 'cam_points', 'world_points', 'point_masks'])
         # print('debug batch["images"]',batch["images"].shape) #([4, 9, 3, 476, 518]) #[B, N, 3, H, W] B is adjusted according to N B: batch size, S: sequence length, 3: RGB channels, H: height, W: width
 
-        # y_hat = model(images=batch["images"])
-        y_hat = model(images=batch["images"], intrinsics=batch["intrinsics"], extrinsics=batch["extrinsics"])
+        y_hat = model(images=batch["images"])
+        # y_hat = model(images=batch["images"], intrinsics=batch["intrinsics"], extrinsics=batch["extrinsics"])
         
         # Loss computation
         loss_dict = self.loss(y_hat, batch)

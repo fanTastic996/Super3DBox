@@ -122,11 +122,16 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                 ],
                 norm=nn.LayerNorm(cubify_embed_dim)),
             #specialized for vggt spatial features
-            fusion_module=FeatureFusionModule_v2(in_channels=2048,
-                                             out_channels=256,
-                                             num_heads=8,
-                                             dropout=0.1,
-                                             fusion_type='add'),
+            # fusion_module=FeatureFusionModule_v2(in_channels=2048,
+            #                                  out_channels=256,
+            #                                  num_heads=8,
+            #                                  dropout=0.1,
+            #                                  fusion_type='add'),
+            fusion_module=FeatureFusionModule_v3(d_clip=256,
+                                             d_spatial_encoder=2048,
+                                             d_attn=256,
+                                             num_heads=8),
+            
             vggt_merger=VGGTMerger(
                         output_dim=2048, #config.hidden_size, #2048
                         hidden_dim=4096, #getattr(config, "vggt_merger_hidden_dim", 4096), #4096
@@ -208,8 +213,8 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                 gravity = gravity_init[:,:,:3,:3] #[B,1,3,3]
                 
                 # print("input",images.shape) #([4, 3, 3, 476, 518])
-                # box_result = self.box_head(
-                all_corners, all_logits = self.box_head(
+                box_result = self.box_head(
+                # all_corners, all_logits = self.box_head(
                     images,
                     aggregated_tokens_list,
                     patch_start_idx,
@@ -218,10 +223,18 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                     gravity=gravity
                     # images=images,
                 )
-                
+            
                 # predictions["box_result"] = box_result
-                predictions["pred_corners"] = all_corners
-                predictions["pred_logits"] = all_logits
+                # predictions["pred_corners"] = all_corners
+                # predictions["pred_logits"] = all_logits
+                
+                predictions["pred_corners"] = [box_result[batch_idx].pred_boxes_3d.corners for batch_idx in range(len(box_result))]
+                predictions["pred_logits"] = [box_result[batch_idx].pred_logits for batch_idx in range(len(box_result))]
+                
+                predictions["pred_scores"] = [box_result[batch_idx].scores for batch_idx in range(len(box_result))]
+                predictions["pred_R"] = [box_result[batch_idx].pred_boxes_3d.R for batch_idx in range(len(box_result))]
+                predictions["pred_center"] = [box_result[batch_idx].pred_boxes_3d.gravity_center for batch_idx in range(len(box_result))]
+                predictions["pred_size"] = [box_result[batch_idx].pred_boxes_3d.dims for batch_idx in range(len(box_result))]
                 
         if self.track_head is not None and query_points is not None:
             track_list, vis, conf = self.track_head(
