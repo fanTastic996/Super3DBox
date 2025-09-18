@@ -206,13 +206,13 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                 predictions["world_points_conf"] = pts3d_conf
 
             if self.box_head is not None:
-                
-                # extract ex and in trinsics [B, N, 3, 4/3]
+                # [Seq, N_img, ...]
+                # extract ex and in trinsics [Seq, N, 3, 4/3]
                 extrinsic, intrinsic = pose_encoding_to_extri_intri(predictions["pose_enc"], images.shape[-2:])
                 gravity_init, _ = gravity_encoding_to_extri_intri(predictions["gravity_enc"], images.shape[-2:]) #[B,1,3,4]
                 gravity = gravity_init[:,:,:3,:3] #[B,1,3,3]
                 
-                # print("input",images.shape) #([4, 3, 3, 476, 518])
+                # print("input",images.shape) #([4(B), 3(N_img), 3, 476, 518])
                 box_result = self.box_head(
                 # all_corners, all_logits = self.box_head(
                     images,
@@ -244,9 +244,10 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
             predictions["vis"] = vis
             predictions["conf"] = conf
 
-        if not self.training:
-            predictions["images"] = images  # store the images for visualization during inference
-
+        # if not self.training:
+            # predictions["images"] = images  # store the images for visualization during inference
+        predictions["images"] = images
+        
         return predictions
 
 if __name__ == "__main__":

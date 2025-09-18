@@ -43,6 +43,8 @@ from train_utils.logging import setup_logging
 from train_utils.normalization import normalize_camera_extrinsics_and_points_batch, normalize_camera_extrinsics_and_points_boxes_batch
 from train_utils.optimizer import construct_optimizers
 import numpy as np
+import pickle
+
 
 
 class Trainer:
@@ -611,6 +613,10 @@ class Trainer:
             # setup gradient clipping at the beginning of training
             self.gradient_clipper.setup_clipping(self.model)
 
+        # for saving the visualized results
+        self.save_flag = False
+        self.temp_iter = 0
+        
         for data_iter, batch in enumerate(train_loader):
 
             if data_iter > limit_train_batches: #800
@@ -635,6 +641,13 @@ class Trainer:
             else:
                 chunked_batches = chunk_batch_for_accum_steps(batch, accum_steps)
 
+            # if (data_iter+1) % 200==0:
+            if (data_iter) % self.logging_conf.save_vis_freq==0 and data_iter != 0:
+                self.save_flag = True
+                self.temp_iter = data_iter
+            else:
+                self.save_flag=False
+            
             self._run_steps_on_batch_chunks(
                 chunked_batches, phase, loss_meters
             )
@@ -747,7 +760,11 @@ class Trainer:
                 if i < accum_steps - 1
                 else contextlib.nullcontext()
             )
-
+            
+            # save results:
+            if i>0:
+                self.save_flag = False
+                
             with ddp_context:
                 # with torch.cuda.amp.autocast(
                 with torch.amp.autocast('cuda',
@@ -843,6 +860,22 @@ class Trainer:
             # exit(0)
         return batch
 
+    def _save_results(self, y_hat):
+        save_dict = {}
+              
+        for key in ['images', 'extrinsics', 'intrinsics', 'pred_corners', 'pred_logits', 'pred_scores', 'pred_R', 'pred_center', 'pred_size']:
+            if key in y_hat:
+                save_dict[key] = y_hat[key][0].detach().cpu().numpy() # 第一个seq
+        
+        save_dir = self.logging_conf.result_dir
+        os.makedirs(save_dir, exist_ok=True)
+        
+        print("Saving predictions...")
+        # 保存到文件
+        with open(os.path.join(save_dir, f'{self.temp_iter}_{self.epoch}_box.pkl'), 'wb') as f:
+            pickle.dump(save_dict, f)  # 序列化并写入
+        print("saved to ", os.path.join(save_dir, f'{self.temp_iter}_{self.epoch}_box.pkl'))
+            
     #@!
     def _step(self, batch, model: nn.Module, phase: str, loss_meters: dict):
         """
@@ -858,6 +891,9 @@ class Trainer:
         y_hat = model(images=batch["images"])
         # y_hat = model(images=batch["images"], intrinsics=batch["intrinsics"], extrinsics=batch["extrinsics"])
         
+        if self.save_flag:
+            self._save_results(y_hat)
+            
         # Loss computation
         loss_dict = self.loss(y_hat, batch)
         

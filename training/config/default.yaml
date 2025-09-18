@@ -50,6 +50,8 @@ data:
 
 
 logging:
+  save_vis_freq: 200
+  result_dir: logs/results
   log_dir: logs
   log_visuals: False
   log_freq: 1
