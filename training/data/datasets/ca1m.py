@@ -155,7 +155,7 @@ class CA1MDataset(BaseDataset):
             
         image_idxs = ids  # 获取图像ID
         #TODO:
-        seq_name = '42444750'
+        # seq_name = '42444750'
         
         
         # print("Seq", seq_name,'ids', ids) 
