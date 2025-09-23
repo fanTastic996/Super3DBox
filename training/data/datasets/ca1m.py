@@ -146,12 +146,23 @@ class CA1MDataset(BaseDataset):
         # 获取序列名称
         if seq_name is None:
             seq_name = self.sequence_list[seq_index]
+        # 指定seq
+        seq_name = '42444750'
         # 如果没有提供特定ID，则随机选择图像
         if ids is None:
-            ids = np.random.choice(
-                self.data_store[seq_name], img_per_seq, replace=self.allow_duplicate_img
-            )
-            ids = np.array([180,200])
+            # ids = np.random.choice(
+            #     self.data_store[seq_name], img_per_seq, replace=self.allow_duplicate_img
+            # )
+            # ids = np.array([180,200])
+            ids = np.array([190, 210])
+            
+            # RANDOM SAMPLE
+            # interval = 20
+            # max_start = self.data_store[seq_name] - (img_per_seq - 1) * interval
+            # # 随机选择一个起始索引（在安全范围内）
+            # start_idx = np.random.randint(0, max_start) if max_start > 0 else 0
+            # # 生成等间隔的索引数组
+            # ids = np.array([start_idx + i * interval for i in range(img_per_seq)])
             
         image_idxs = ids  # 获取图像ID
         #TODO:

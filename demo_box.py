@@ -30,7 +30,7 @@ data_root = '/data/lyq/ca1m/ca1m/train-CA-1M-slam'
 # scene_id = '43649409'
 # image_names = [f"{data_root}/{scene_id}/rgb/478.png", f"{data_root}/{scene_id}/rgb/546.png"]  
 scene_id = '42444750'
-image_names = [f"{data_root}/{scene_id}/rgb/180.png", f"{data_root}/{scene_id}/rgb/200.png"]  
+image_names = [f"{data_root}/{scene_id}/rgb/190.png", f"{data_root}/{scene_id}/rgb/210.png"]  
 images = load_and_preprocess_images(image_names).to(device)
 print("images", images.shape, torch.max(images), torch.min(images))
 
@@ -53,8 +53,8 @@ with torch.no_grad():
   
         
         save_dict = {}
-        save_dict["extrinsic"] = predictions["extrinsic"].cpu().numpy()
-        save_dict["intrinsic"] = predictions["intrinsic"].cpu().numpy()
+        save_dict["extrinsics"] = predictions["extrinsic"].cpu().numpy()
+        save_dict["intrinsics"] = predictions["intrinsic"].cpu().numpy()
         # bboxes_3d = pred_3d_boxes.pred_boxes_3d
         # save_dict["box_result"] = {
         #     "scores": pred_3d_boxes.scores.cpu().numpy(),
@@ -64,10 +64,12 @@ with torch.no_grad():
         # }
         
         save_dict["box_result"] = {
-            "scores":  predictions['pred_scores'][0].cpu().numpy(),
+            "scores": predictions['pred_scores'][0].cpu().numpy(),
             "R": predictions['pred_R'][0].cpu().numpy(),
             "center": predictions['pred_center'][0].cpu().numpy(),
             "size": predictions['pred_size'][0].cpu().numpy(),
+            # 'ids': predictions['ids'][0].cpu().numpy(),
+            'images': predictions['images'][0].cpu().numpy(),  # (N, 3, H, W)
         }
         
         # valid_mask = pred_3d_boxes.scores.cpu().numpy()>=0.0

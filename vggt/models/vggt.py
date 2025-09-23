@@ -236,6 +236,9 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                 predictions["pred_center"] = [box_result[batch_idx].pred_boxes_3d.gravity_center for batch_idx in range(len(box_result))]
                 predictions["pred_size"] = [box_result[batch_idx].pred_boxes_3d.dims for batch_idx in range(len(box_result))]
                 
+                predictions["extrinsics"] = extrinsic
+                predictions["intrinsics"] = intrinsic
+                
         if self.track_head is not None and query_points is not None:
             track_list, vis, conf = self.track_head(
                 aggregated_tokens_list, images=images, patch_start_idx=patch_start_idx, query_points=query_points

@@ -223,7 +223,7 @@ class Trainer:
         # Load training progress prev_epoch
         # if "epoch" in checkpoint:
         if "prev_epoch" in checkpoint:
-            self.epoch = checkpoint["prev_epoch"]
+            self.epoch = checkpoint["prev_epoch"] + 1
             logging.info(f"Loading epoch start (epoch: {self.epoch})")
             
         self.steps = checkpoint["steps"] if "steps" in checkpoint else {"train": 0, "val": 0}
@@ -429,7 +429,7 @@ class Trainer:
         assert self.mode in ["train", "val"], f"Invalid mode: {self.mode}"
         if self.mode == "train":
             self.run_train()
-            # Optionally run a final validation after all training is done
+            #TODO: Optionally run a final validation after all training is done
             self.run_val()
         elif self.mode == "val":
             self.run_val()
@@ -628,8 +628,18 @@ class Trainer:
             
             # with torch.cuda.amp.autocast(enabled=False):
             with torch.amp.autocast('cuda', enabled=False):
+                # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                start_process_batch_time = time.time()
+                # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                
                 batch = self._process_batch(batch)
-
+                
+                # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                self.last_process_batch_time = time.time() - start_process_batch_time
+                if data_iter % self.logging_conf.log_freq == 0 and self.rank == 0:
+                    logging.info(f"_process_batch time: {self.last_process_batch_time:.4f}s (iter {data_iter})")
+                # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                
             batch = copy_data_to_device(batch, self.device, non_blocking=True)
             
             accum_steps = self.accum_steps
@@ -648,9 +658,21 @@ class Trainer:
             else:
                 self.save_flag=False
             
+            # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            start_run_chunks_time = time.time()
+            print("batch img shape", batch['images'].shape, data_iter)
+            # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            
+
             self._run_steps_on_batch_chunks(
                 chunked_batches, phase, loss_meters
             )
+            
+            # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            run_chunks_elapsed = time.time() - start_run_chunks_time
+            if data_iter % self.logging_conf.log_freq == 0 and self.rank == 0:
+                logging.info(f"_run_steps_on_batch_chunks time: {run_chunks_elapsed:.4f}s (iter {data_iter})")
+            # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
             # compute gradient and do SGD step
             assert data_iter <= limit_train_batches  # allow for off by one errors
@@ -762,7 +784,7 @@ class Trainer:
             )
             
             # save results:
-            if i>0:
+            if i > 0:
                 self.save_flag = False
                 
             with ddp_context:
@@ -863,7 +885,7 @@ class Trainer:
     def _save_results(self, y_hat):
         save_dict = {}
               
-        for key in ['images', 'extrinsics', 'intrinsics', 'pred_corners', 'pred_logits', 'pred_scores', 'pred_R', 'pred_center', 'pred_size']:
+        for key in ['images', 'ids', 'extrinsics', 'intrinsics', 'pred_corners', 'pred_logits', 'pred_scores', 'pred_R', 'pred_center', 'pred_size']:
             if key in y_hat:
                 save_dict[key] = y_hat[key][0].detach().cpu().numpy() # 第一个seq
         
@@ -890,7 +912,7 @@ class Trainer:
 
         y_hat = model(images=batch["images"])
         # y_hat = model(images=batch["images"], intrinsics=batch["intrinsics"], extrinsics=batch["extrinsics"])
-        
+        y_hat['ids'] = batch['ids']
         if self.save_flag:
             self._save_results(y_hat)
             

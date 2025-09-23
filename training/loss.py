@@ -717,6 +717,63 @@ def hungarian_2d_matching(cost_matrix):
     row_ind, col_ind = linear_sum_assignment(cost_matrix.detach().cpu())
     return torch.as_tensor(row_ind, dtype=torch.long), torch.as_tensor(col_ind, dtype=torch.long)
 
+
+# zhi rui version
+@torch.no_grad()
+def hungarian_match_batch(pred_line, pred_bezier, pred_circle, pred_logits, gt_curves_pts, gt_curves_ends, gt_curves_types,gt_centers,gt_radiis, **cost_kwargs):
+    """
+    pred_ctrls: (batch_size, P, K, D)
+    gt_ctrls_list: list of B tensors, each (G_i, K, D)
+    returns: list of (pred_inds, gt_inds) each as np arrays
+    """
+    device = pred_logits.device
+    bs, num_queries = pred_line.shape[:2]
+    pred_logits = pred_logits.flatten(0, 1).softmax(-1) # [batch_size * num_queries, num_classes+1]
+    pred_line = pred_line.flatten(0, 1)  # # [batch_size * num_queries, 6]
+    pred_circle = pred_circle.flatten(0, 1)  # # [batch_size * num_queries, 7]
+    pred_bezier = pred_bezier.flatten(0, 1)  # [batch_size * num_queries, 12]
+
+    tgt_curves_pts = torch.cat([gt_curve_pts[gt_curve_types>=0] for gt_curve_pts, gt_curve_types in zip(gt_curves_pts, gt_curves_types)])
+    tgt_curves_ends = torch.cat([gt_curve_ends[gt_curve_types>=0] for gt_curve_ends, gt_curve_types in zip(gt_curves_ends, gt_curves_types)])
+    gt_center = torch.cat([gt_center[gt_curve_types>=0] for gt_center, gt_curve_types in zip(gt_centers, gt_curves_types)])
+    gt_radii = torch.cat([gt_radii[gt_curve_types>=0] for gt_radii, gt_curve_types in zip(gt_radiis, gt_curves_types)])
+
+    
+    tgt_ids = torch.cat([gt_curve_types[gt_curve_types>=0] for gt_curve_types in gt_curves_types])
+    # Compute the classification cost. Contrary to the loss, we don't use the NLL,
+    # but approximate it in 1 - proba[target class].
+    # The 1 is a constant that doesn't change the matching, it can be ommitted.
+    cost_class = -pred_logits[:, tgt_ids]  # [batch_size * num_queries, G]
+
+    # sample line 
+    line_samp = sample_line(pred_line, cost_kwargs["num_samples"])
+
+    # sample circle 
+    circle_samp = sample_circle(pred_circle, cost_kwargs["num_samples"]) # (B*S, T, 3)
+
+    # sample bezier 
+    bezier_samp = sample_bezier(pred_bezier, cost_kwargs["num_samples"])  # (B1, T, 3)
+
+
+    LINE, BEZ, CIR = 0, 1, 2
+    mask_line = (tgt_ids == LINE)
+    mask_bez  = (tgt_ids == BEZ)
+    mask_cir  = (tgt_ids == CIR)
+    G = tgt_ids.shape[0]
+    geom_cost = torch.zeros((bs*num_queries, G), device=device)
+    end_cost  = torch.zeros((bs*num_queries, G), device=device)
+
+    geom_cost = dist_loss_pair_l1(bezier_samp, tgt_curves_pts)
+    end_cost = dist_loss_pair_l1(torch.stack([pred_bezier[:,0:3], pred_bezier[:,9:12]], dim=1), tgt_curves_ends)
+
+
+    # Final cost matrix
+    C = cost_class*cost_kwargs["w_class"] + geom_cost*cost_kwargs["w_chamfer"] + end_cost*cost_kwargs["w_chamfer"]
+    C = C.view(bs, num_queries, -1).cpu()
+    sizes = [len(gt_curve_types[gt_curve_types>=0]) for gt_curve_types in gt_curves_types]
+    indices = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes, -1))]
+    return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
+
 # ---------- 1) 构造 3D Chamfer 代价矩阵 ----------
 def build_3d_cost(pred_corners, gt_corners):
     """
@@ -736,29 +793,64 @@ def build_3d_cost(pred_corners, gt_corners):
             cost[i, j] = chamfer_ij
     return cost
 
-# ---------- 1) 构造 3D Chamfer 和 logits 的代价矩阵 ----------
+# # ---------- 1) 构造 3D Chamfer 和 logits 的代价矩阵 ----------
+# def build_3d_cost_logits(pred_corners, gt_corners, pred_logits, cost_kwargs):
+#     """
+#     pred_corners: [N_pred, 8, 3]
+#     gt_corners  : [N_gt, 8, 3] 
+#     pred_logits:  [N_pred, 2]  每个预测框的 logits, 0维度是背景概率, 1维度是前景概率
+#     logit_weight: weight for logit cost component
+#     return      : [N_pred, N_gt]  每个元素是 (pred_i, gt_j) 的 Chamfer 距离 + logit cost
+#     """
+#     N_pred, N_gt = pred_corners.shape[0], gt_corners.shape[0]
+#     cost = torch.zeros(N_pred, N_gt, device=pred_corners.device)
+    
+#     for i in range(N_pred):
+#         for j in range(N_gt):
+#             # 两个 8×3 点集之间的 Chamfer
+#             dist = torch.cdist(pred_corners[i], gt_corners[j])   # [8,8]
+#             chamfer_ij = dist.min(dim=1)[0].mean() + dist.min(dim=0)[0].mean()
+            
+#             # 添加 logit cost - 对于 GT box，我们希望前景概率高（logits[1]大）
+#             # 所以 logit cost = -pred_logits[i, 1] （负号表示前景概率越高，cost 越小）
+#             logit_cost = -pred_logits[i, 1]  # 前景logit越大，cost越小
+#             1
+#             cost[i, j] = cost_kwargs['chamfer_weight'] * chamfer_ij + cost_kwargs['class_weight'] * logit_cost
+#     return cost
+
+# ---------- 1) 构造 3D Chamfer 和 logits 的代价矩阵 (vectorized) ----------
 def build_3d_cost_logits(pred_corners, gt_corners, pred_logits, cost_kwargs):
     """
+    Vectorized cost matrix computation (no Python for-loops).
+
     pred_corners: [N_pred, 8, 3]
-    gt_corners  : [N_gt, 8, 3] 
-    pred_logits:  [N_pred, 2]  每个预测框的 logits, 0维度是背景概率, 1维度是前景概率
-    logit_weight: weight for logit cost component
-    return      : [N_pred, N_gt]  每个元素是 (pred_i, gt_j) 的 Chamfer 距离 + logit cost
+    gt_corners  : [N_gt, 8, 3]
+    pred_logits : [N_pred, 2] (background, foreground)
+    cost = chamfer_weight * chamfer_distance + class_weight * (-foreground_logit)
+    return: [N_pred, N_gt]
     """
+    device = pred_corners.device
     N_pred, N_gt = pred_corners.shape[0], gt_corners.shape[0]
-    cost = torch.zeros(N_pred, N_gt, device=pred_corners.device)
-    
-    for i in range(N_pred):
-        for j in range(N_gt):
-            # 两个 8×3 点集之间的 Chamfer
-            dist = torch.cdist(pred_corners[i], gt_corners[j])   # [8,8]
-            chamfer_ij = dist.min(dim=1)[0].mean() + dist.min(dim=0)[0].mean()
-            
-            # 添加 logit cost - 对于 GT box，我们希望前景概率高（logits[1]大）
-            # 所以 logit cost = -pred_logits[i, 1] （负号表示前景概率越高，cost 越小）
-            logit_cost = -pred_logits[i, 1]  # 前景logit越大，cost越小
-            1
-            cost[i, j] = cost_kwargs['chamfer_weight'] * chamfer_ij + cost_kwargs['class_weight'] * logit_cost
+
+    if N_pred == 0 or N_gt == 0:
+        return torch.zeros(N_pred, N_gt, device=device)
+
+    # Pairwise point distances for every (pred_box, gt_box)
+    # diff: [N_pred, N_gt, 8, 8, 3]
+    diff = pred_corners[:, None, :, None, :] - gt_corners[None, :, None, :, :]
+    dist = torch.norm(diff, dim=-1)  # [N_pred, N_gt, 8, 8]
+
+    # Chamfer components
+    # For each pred point find nearest gt point
+    min_pred = dist.min(dim=3)[0].mean(dim=2)  # [N_pred, N_gt]
+    # For each gt point find nearest pred point
+    min_gt = dist.min(dim=2)[0].mean(dim=2)    # [N_pred, N_gt]
+    chamfer = min_pred + min_gt                # [N_pred, N_gt]
+
+    # Classification (foreground encourages lower cost)
+    logit_cost = -pred_logits[:, 0].unsqueeze(1).expand(N_pred, N_gt)
+
+    cost = cost_kwargs['chamfer_weight'] * chamfer + cost_kwargs['class_weight'] * logit_cost
     return cost
 
 # ---------- 总接口 ----------
@@ -819,7 +911,7 @@ def compute_box_logit_loss_single(
     N_pred, N_gt = pred_corners.shape[0], gt_corners.shape[0]
     
     # 创建分类标签：所有预测框初始为背景(0)
-    class_labels = torch.zeros(N_pred, dtype=torch.long, device=pred_corners.device)
+    class_labels = torch.ones(N_pred, dtype=torch.long, device=pred_corners.device)
     
     chamfer_loss_val = torch.tensor(0.0, device=pred_corners.device, requires_grad=True)
     
@@ -837,8 +929,8 @@ def compute_box_logit_loss_single(
         matched_gt = gt_corners[gt_idx]
         chamfer_loss_val = chamfer_loss(matched_pred, matched_gt)
         
-        # 4) 将匹配上的预测框标记为前景(1)
-        class_labels[pred_idx] = 1
+        # 4) 将匹配上的预测框标记为前景(0)
+        class_labels[pred_idx] = 0
 
     # 5) 分类损失：对所有预测框计算交叉熵损失
     class_loss = F.cross_entropy(pred_logits, class_labels)

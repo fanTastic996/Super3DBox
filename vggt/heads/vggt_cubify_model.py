@@ -307,8 +307,10 @@ class PromptDecoder(nn.Module):
         # Not the best assumption for now, but assume we can treat the "prompt" in a uniform manner as "reference.
         # Interleave so we have List[List[Instances]] of size # of instances x # of prompts
         # Original implementation:
-        reference = [Instances3D.cat([prompt.pred[idx] for prompt in prompts if prompt.box_attn_prior_mask.any()])
-                     for idx in range(prompts[0].batch_size)] #batch size: N
+        # print("prompts[0].batch_size", prompts[0].batch_size)
+        # print("len of prompts", len(prompts))
+        # print(prompts)
+        reference = [Instances3D.cat([prompt.pred[idx] for prompt in prompts if prompt.box_attn_prior_mask.any()]) for idx in range(prompts[0].batch_size)] #batch size: N
         
         # REVISED BY LYQ
         # reference = []
@@ -941,7 +943,7 @@ class EncoderProposals(Prompter):
         output_memory, box_proposals = self.gen_encoder_output_proposals(
             memory, mask_flatten, spatial_shapes, sensor) #sensor无影响
 
-        encoder_proposals = [Instances3D(image_size) for image_size in sensor["image"].data.image_sizes]
+        encoder_proposals = [Instances3D(image_size) for image_size in sensor["image"].data.image_sizes for _ in range(memory.shape[0])]
         for encoder_proposals_, box_proposals_ in zip(encoder_proposals, box_proposals):
             # We call these anchors because they follow some spatial prior.
             encoder_proposals_.proposal_boxes = box_proposals_
@@ -973,7 +975,7 @@ class EncoderProposals(Prompter):
         # topk_boxes = topk_indexes // class_prob.shape[-1]
         
         #TODO:changed 25-9-6-lyq
-        front_logits = class_prob[..., 1]
+        front_logits = class_prob[..., 0] #1
         topk_scores, topk_boxes = torch.topk(front_logits.view(-1), topk)
         
         
