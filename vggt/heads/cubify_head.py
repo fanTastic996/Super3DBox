@@ -1806,7 +1806,7 @@ class CubifyHead(nn.Module):
         )
         
         # 6. 处理最后层输出
-        prompt_outputs = intermediate_preds[-1]
+        prompt_outputs = intermediate_preds #[-1] old
         prompt_start_idx = 0
         results = None
         
@@ -1826,9 +1826,12 @@ class CubifyHead(nn.Module):
                     topk=self.topk_per_image
                 )
                 prompt_start_idx += prompt.number_prompts
-                break  # 通常只有一个提示器产生输出
+                
+                all_results.append(results[0])
+                
+                #break  # 通常只有一个提示器产生输出
         
-            all_results.append(results[0])
+            
 
             
         return all_results
