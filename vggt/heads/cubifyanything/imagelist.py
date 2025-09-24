@@ -105,11 +105,21 @@ class ImageList:
 
         if len(tensors) == 1:
             # This seems slightly (2%) faster.
-            # TODO: check whether it's faster for multiple images as well
             image_size = image_sizes[0]
             padding_size = [0, max_size[-1] - image_size[1], 0, max_size[-2] - image_size[0]]
             batched_imgs = F.pad(tensors[0], padding_size, value=pad_value).unsqueeze_(0)
         else:
-            raise NotImplementedError
+            # General case: pad each tensor to (max_h, max_w) and stack
+            if isinstance(max_size, torch.Tensor):
+                max_h, max_w = int(max_size[0]), int(max_size[1])
+            else:
+                max_h, max_w = max_size  # already a list/tuple
+            num_imgs = len(tensors)
+            prefix_shape = tensors[0].shape[:-2]  # (C_1, ..., C_K) or empty
+            out_shape = (num_imgs, *prefix_shape, max_h, max_w)
+            batched_imgs = tensors[0].new_full(out_shape, pad_value)
+            for i, img in enumerate(tensors):
+                h, w = img.shape[-2], img.shape[-1]
+                batched_imgs[i, ..., :h, :w].copy_(img)
 
         return ImageList(batched_imgs.contiguous(), image_sizes)

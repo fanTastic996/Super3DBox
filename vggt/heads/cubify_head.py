@@ -29,6 +29,7 @@ from cubifyanything.sensor import SensorArrayInfo, SensorInfo, PosedSensorInfo
 from scipy.spatial.transform import Rotation
 from cubifyanything.batching import Sensors
 from PIL import Image
+from einops import rearrange
 
 def box_cxcywh_to_xyxy(x):
     x_c, y_c, w, h = x.unbind(-1)
@@ -1697,51 +1698,56 @@ class CubifyHead(nn.Module):
         img_W = vggt_images.shape[-1]
         #sensor_info: .wide.image .wide.image.K .wide.T_gravity .wide.RT
         
-        sample = {"wide": {'image': vggt_images},
-                      "sensor_info": self.sensor_info}
+        # sample = {"wide": {'image': vggt_images},
+        #               "sensor_info": self.sensor_info}
         
-        sample["wide"]['image'] = (sample["wide"]['image'] * 255.).to(torch.uint8)
+        # sample["wide"]['image'] = (sample["wide"]['image'] * 255.).to(torch.uint8)
         
-        if intrinsic is not None and extrinsic is not None:
-            sample["sensor_info"].wide.image = sample["sensor_info"].wide.image.resize((img_H, img_W))
-            sample["sensor_info"].wide.image.K = sample["sensor_info"].wide.image.K.repeat(N_batch, 1, 1)
-            sample["sensor_info"].wide.image.K[:, :3, :3] = intrinsic[:, 0].detach().cpu()[:3, :3]
-            sample["sensor_info"].wide.RT = sample["sensor_info"].wide.RT.repeat(N_batch, 1, 1)
-            sample["sensor_info"].wide.T_gravity = sample["sensor_info"].wide.T_gravity.repeat(N_batch, 1, 1)
-            sample["sensor_info"].wide.T_gravity[:, :3, :3] = gravity.squeeze()[:, ...].detach().cpu()
+        # if intrinsic is not None and extrinsic is not None:
+        #     sample["sensor_info"].wide.image = sample["sensor_info"].wide.image.resize((img_H, img_W))
+        #     sample["sensor_info"].wide.image.K = sample["sensor_info"].wide.image.K.repeat(N_batch, 1, 1)
+        #     sample["sensor_info"].wide.image.K[:, :3, :3] = intrinsic[:, 0].detach().cpu()#[:3, :3]
+        #     sample["sensor_info"].wide.RT = sample["sensor_info"].wide.RT.repeat(N_batch, 1, 1)
+        #     sample["sensor_info"].wide.T_gravity = sample["sensor_info"].wide.T_gravity.repeat(N_batch, 1, 1)
+        #     sample["sensor_info"].wide.T_gravity[:, :3, :3] = gravity.squeeze()[:, ...].detach().cpu()
             
         #reshape to [N_batch * N_img, 3, H, W]
-        sample["wide"]['image'] = sample["wide"]['image'].view(-1,3,img_H,img_W)
+        # sample["wide"]['image'] = sample["wide"]['image'].view(-1,3,img_H,img_W)
         
         #>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-        # for j in range(N_batch): # 一个个batch轮流来，因为cubify不支持
+        all_packaged = []
+        for j in range(N_batch): # 一个个batch轮流来，因为cubify不支持
         #     # 1. 特征提取（主干网络）
-        #     sample = {"wide": {'image': vggt_images[j]},
-        #               "sensor_info": self.sensor_info}
+            sample = {"wide": {'image': vggt_images[j]},
+                      "sensor_info": self.sensor_info}
             
-        #     sample["wide"]['image'] = (sample["wide"]['image'] * 255.).to(torch.uint8)
+            sample["wide"]['image'] = (sample["wide"]['image'] * 255.).to(torch.uint8)
 
             
-        #     if intrinsic is not None and extrinsic is not None:
+            if intrinsic is not None and extrinsic is not None:
 
-        #         sample["sensor_info"].wide.image = sample["sensor_info"].wide.image.resize((img_H, img_W))
+                sample["sensor_info"].wide.image = sample["sensor_info"].wide.image.resize((img_H, img_W))
                 
-        #         sample["sensor_info"].wide.image.K[0,:3,:3] = intrinsic[j,0].detach().cpu()[:3,:3]
+                sample["sensor_info"].wide.image.K[0,:3,:3] = intrinsic[j,0].detach().cpu()[:3,:3]
                 
             
-        #     # GT T_gravity
-        #     sample["sensor_info"].wide.T_gravity = gravity[j]
+            # GT T_gravity
+            sample["sensor_info"].wide.T_gravity = gravity[j]
             
             
-        packaged = self.augmentor.package(sample)
-        device = self.pixel_mean
-        packaged = move_input_to_current_device(packaged, device)
-        batched_sensors = self.preprocessor.preprocess([packaged])
+            packaged = self.augmentor.package(sample)
+            device = self.pixel_mean
+            packaged = move_input_to_current_device(packaged, device)
+            all_packaged.append(packaged)
+            
+        batched_sensors = self.preprocessor.preprocess(all_packaged)
         
         sensor = batched_sensors[self.sensor_name]   
         if len(sensor['image'].data.tensor.shape) > 4:
             sensor['image'].data.tensor = sensor['image'].data.tensor.squeeze(0) 
-
+        if len(sensor['image'].data.tensor.shape) > 4:
+            sensor['image'].data.tensor = sensor['image'].data.tensor.view(N_batch*N_img, 3, sensor['image'].data.tensor.shape[-2], sensor['image'].data.tensor.shape[-1])
+            
         features = self.backbone(sensor)
         
     
@@ -1775,6 +1781,10 @@ class CubifyHead(nn.Module):
         
         fused_features = multiframe_fused_features #.reshape(1, -1, 256)  #[1, N*single_img_token, 256]
         
+        fused_features = rearrange(fused_features, '(b n) c d -> b (n c) d', b=4, n=2)
+        mask_flatten = mask_flatten.reshape(N_batch,-1)
+        # valid_ratios = valid_ratios.reshape(N)
+        
         #TODO: not sure if this is useful
         # spatial_shapes[0, 1] = spatial_shapes[0, 1] * multiframe_fused_features.shape[0]
         # lvl_pos_embed = lvl_pos_embed.repeat(1, multiframe_fused_features.shape[0], 1)
@@ -1789,6 +1799,8 @@ class CubifyHead(nn.Module):
         #TODO: not sure if this is useful
         # mask_flatten = mask_flatten.reshape(1, -1)
         # spatial_shapes = spatial_shapes.repeat(N_batch, 1)
+        
+        spatial_shapes[0, 1]= spatial_shapes[0, 1]*N_img
         
         prompts = self.prompting.get_image_prompts(
             fused_features, mask_flatten, spatial_shapes, sensor
