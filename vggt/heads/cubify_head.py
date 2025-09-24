@@ -1811,14 +1811,14 @@ class CubifyHead(nn.Module):
         '''
         Decoder接收Prompter生成的Object Queries，通过与图像特征的交互（注意力机制）逐步优化这些查询，最终输出精确的3D检测结果
         '''
-        lvl_pos_embed = lvl_pos_embed.repeat(fused_features.shape[0],1,1)
+        lvl_pos_embed = lvl_pos_embed.repeat(1, N_img, 1)
         _, intermediate_preds = self.decoder(
             fused_features, lvl_pos_embed, mask_flatten, spatial_shapes, 
             level_start_index, valid_ratios, prompts, sensor
         )
         
         # 6. 处理最后层输出
-        prompt_outputs = intermediate_preds #[-1] old
+        prompt_outputs = intermediate_preds[-1] #[-1] old
         prompt_start_idx = 0
         results = None
         
@@ -1838,10 +1838,11 @@ class CubifyHead(nn.Module):
                     topk=self.topk_per_image
                 )
                 prompt_start_idx += prompt.number_prompts
+                break  # 通常只有一个提示器产生输出
                 
-                all_results.append(results[0])
+        all_results.append(results[0])
                 
-                #break  # 通常只有一个提示器产生输出
+                
         
             
 

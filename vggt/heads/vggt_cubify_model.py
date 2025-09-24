@@ -943,7 +943,8 @@ class EncoderProposals(Prompter):
         output_memory, box_proposals = self.gen_encoder_output_proposals(
             memory, mask_flatten, spatial_shapes, sensor) #sensor无影响
 
-        encoder_proposals = [Instances3D(image_size) for image_size in sensor["image"].data.image_sizes for _ in range(memory.shape[0])]
+        # encoder_proposals = [Instances3D(image_size) for image_size in sensor["image"].data.image_sizes for _ in range(memory.shape[0])]
+        encoder_proposals = [Instances3D(image_size) for image_size in sensor["image"].data.image_sizes]
         for encoder_proposals_, box_proposals_ in zip(encoder_proposals, box_proposals):
             # We call these anchors because they follow some spatial prior.
             encoder_proposals_.proposal_boxes = box_proposals_
