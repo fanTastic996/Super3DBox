@@ -317,7 +317,55 @@ class PreNormGlobalDecoderLayer(nn.Module):
 
         return tgt
 
+def _rodrigues_from_axis_angle(axis, angle):
+    # axis: (3,)  单位向量
+    # angle: 标量 (rad)
+    K = torch.tensor([[0.0, -axis[2], axis[1]],
+                      [axis[2], 0.0, -axis[0]],
+                      [-axis[1], axis[0], 0.0]], dtype=axis.dtype, device=axis.device)
+    I = torch.eye(3, dtype=axis.dtype, device=axis.device)
+    s, c = torch.sin(angle), torch.cos(angle)
+    return I + s * K + (1 - c) * (K @ K)
 
+def _align_up_remove_roll_pitch(R, eps=1e-8):
+    """
+    给定 3x3 旋转矩阵 R（把相机坐标系带到世界坐标系），
+    返回一个 3x3 的校正矩阵 R_align，使得：
+      - R_align 只由 x/z 自由度构成（轴 ∈ xz 平面，绕 y 的分量为 0）
+      - 应用后，上方向对齐世界 +Y：  R_align @ (R @ e_y) = [0,1,0]
+    """
+    dtype, device = R.dtype, R.device
+    I = torch.eye(3, dtype=dtype, device=device)
+    world_up = torch.tensor([0.0, 1.0, 0.0], dtype=dtype, device=device)
+
+    # 相机上方向在世界坐标下的方向：相机的 e_y 为 [0,1,0]，在世界系中是 R @ e_y = R[:,1]
+    u = R[:, 1]  # (3,)
+    u = u / (u.norm() + eps)
+
+    # 旋转轴 = u × world_up，天然在 xz 平面（其 y 分量为 0），因此不含绕 y 的分量
+    axis = torch.cross(u, world_up)
+    s = axis.norm()
+    c = torch.clamp((u * world_up).sum(), -1.0, 1.0)  # = cos(theta)
+
+    if s < 1e-7:
+        # u 与 world_up 平行或反平行
+        if c > 0.0:
+            # 已对齐：无需旋转
+            R_align = I
+        else:
+            # 反向：需要 180°，任选 xz 平面内且与 u 垂直的轴
+            # 取更稳定的：选 u 在 x 或 z 分量更小的正交轴
+            if abs(u[0]) < abs(u[2]):
+                axis180 = torch.tensor([1.0, 0.0, 0.0], dtype=dtype, device=device)
+            else:
+                axis180 = torch.tensor([0.0, 0.0, 1.0], dtype=dtype, device=device)
+            R_align = -I + 2.0 * (axis180[:, None] @ axis180[None, :])  # 180°: R = 2uu^T - I
+    else:
+        axis = axis / s
+        angle = torch.atan2(s, c)  # 稳定地得到角度
+        R_align = _rodrigues_from_axis_angle(axis, angle)
+
+    return R_align
 
     
 def get_camera_to_gravity_transform(pose, current, target=ImageOrientation.UPRIGHT):
@@ -337,10 +385,21 @@ def get_camera_to_gravity_transform(pose, current, target=ImageOrientation.UPRIG
         (fake_corners[:, 4] - fake_corners[:, 0]) / torch.linalg.norm(fake_corners[:, 4] - fake_corners[:, 0], dim=-1)[:, None],
     ], dim=1).permute(0, 2, 1)
 
-    # this gets applied _after_ predictions to put it in camera space.
-    T = Rotation.from_euler("xz", Rotation.from_matrix(fake_basis[-1].cpu().numpy()).as_euler("yxz")[1:]).as_matrix()
+    # # this gets applied _after_ predictions to put it in camera space.
+    # T = Rotation.from_euler("xz", Rotation.from_matrix(fake_basis[-1].cpu().numpy()).as_euler("yxz")[1:]).as_matrix()
+    # # warning: /home/lanyuqing/myproject/vggt/vggt/heads/cubify_head.py:1692: UserWarning: Gimbal lock detected. Setting third angle to zero since it is not possible to uniquely determine all angles.
 
-    return torch.tensor(T).to(pose)
+
+    # return torch.tensor(T).to(pose)
+    
+    # TODO: change from_euler not sure if this is right
+    R = fake_basis[-1].to(pose)             # (3,3)
+    R_align = _align_up_remove_roll_pitch(R)  # (3,3)
+
+    T = torch.eye(4, dtype=pose.dtype, device=pose.device)
+    T[:3, :3] = R_align
+
+    return T
 
 # This should be super vague, and take in "prompts" as queries and simply run them through
 # the underlying transformer.
@@ -1445,16 +1504,6 @@ class CubifyHead(nn.Module):
             K=torch.tensor([[573.6569,   0.0000, 259.0],
          [  0.0000, 575.0908, 259.0],
          [  0.0000,   0.0000,   1.0000]])[None])
-            # K=torch.tensor([
-            #     [215, 0.0, 215],
-            #     [0.0, 215, 215],
-            #     [0.0, 0.0, 1.0]
-            # ])[None])
-            # K=torch.tensor([
-            #     [852.9301, 0.0, 382.9973],
-            #     [0.0, 852.9301, 512.4680],
-            #     [0.0, 0.0, 1.0]
-            # ])[None])
         wide.image = image_info
         new_size = (int(wide.image.size[0] ), int(wide.image.size[1] ))
         wide.image = wide.image.resize(new_size)
@@ -1781,8 +1830,8 @@ class CubifyHead(nn.Module):
         
         fused_features = multiframe_fused_features #.reshape(1, -1, 256)  #[1, N*single_img_token, 256]
         
-        fused_features = rearrange(fused_features, '(b n) c d -> b (n c) d', b=4, n=2)
-        mask_flatten = mask_flatten.reshape(N_batch,-1)
+        fused_features = rearrange(fused_features, '(b n) c d -> b (n c) d', b = N_batch, n = N_img)
+        mask_flatten = mask_flatten.reshape(N_batch, -1)
         # valid_ratios = valid_ratios.reshape(N)
         
         #TODO: not sure if this is useful
@@ -1838,15 +1887,11 @@ class CubifyHead(nn.Module):
                     topk=self.topk_per_image
                 )
                 prompt_start_idx += prompt.number_prompts
+                
+                all_results = results
                 break  # 通常只有一个提示器产生输出
                 
-        all_results.append(results[0])
-                
-                
-        
-            
-
-            
+   
         return all_results
 
 

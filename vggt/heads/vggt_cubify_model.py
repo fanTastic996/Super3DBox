@@ -1017,8 +1017,6 @@ class EncoderProposals(Prompter):
     def inference(self, prompt, output, sensor, topk):
         results = []
         for index, output_ in enumerate(output):
-            #TODO: added to change to batch, ori is len=1
-            output_ = output_[0]
             info = sensor["image"].sensor[index]
 
             K = info.image.K[-1:].repeat(len(output_), 1, 1)

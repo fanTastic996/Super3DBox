@@ -52,11 +52,14 @@ class ComposedDataset(Dataset, ABC):
         # Probability of using shared jitter vs. frame-specific jitter
         self.cojitter_ratio = common_config.augs.cojitter_ratio
         # Initialize image augmentations (color jitter, grayscale, gaussian blur)
-        self.image_aug = get_image_augmentation(
-            color_jitter=common_config.augs.color_jitter,
-            gray_scale=common_config.augs.gray_scale,
-            gau_blur=common_config.augs.gau_blur,
-        )
+        if common_config.augs.use:
+            self.image_aug = get_image_augmentation(
+                color_jitter=common_config.augs.color_jitter,
+                gray_scale=common_config.augs.gray_scale,
+                gau_blur=common_config.augs.gau_blur,
+            )
+        else:
+            self.image_aug = None
 
         # --- Optional Fixed Settings (useful for debugging) ---
         # Force each sequence to have exactly this many images (if > 0)

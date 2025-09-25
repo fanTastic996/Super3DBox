@@ -156,3 +156,5 @@ training/backup
 examples/
 
 vis_results/
+
+*.png

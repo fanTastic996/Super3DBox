@@ -31,6 +31,7 @@ data:
       repeat_batch: False
 
       augs:
+        use: False # added
         cojitter: True
         cojitter_ratio: 0.3
         scales: [0.8, 1.2]
@@ -53,7 +54,7 @@ data:
     shuffle: True
     pin_memory: False
     common_config:  # common config for evaluation
-      fix_img_num: 3 #-1 # -1 means do not fix the number of images
+      fix_img_num: -1 # -1 means do not fix the number of images
       fix_aspect_ratio: 1.0
       load_track: False
       track_num: 1024
@@ -71,6 +72,7 @@ data:
       allow_duplicate_img: True
 
       augs:
+        use: False # added
         cojitter: False
         cojitter_ratio: 0.5
         scales: null

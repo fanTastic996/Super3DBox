@@ -628,17 +628,17 @@ class Trainer:
             
             # with torch.cuda.amp.autocast(enabled=False):
             with torch.amp.autocast('cuda', enabled=False):
-                # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-                start_process_batch_time = time.time()
-                # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                # # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                # start_process_batch_time = time.time()
+                # # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                 
                 batch = self._process_batch(batch)
                 
-                # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-                self.last_process_batch_time = time.time() - start_process_batch_time
-                if data_iter % self.logging_conf.log_freq == 0 and self.rank == 0:
-                    logging.info(f"_process_batch time: {self.last_process_batch_time:.4f}s (iter {data_iter})")
-                # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                # # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                # self.last_process_batch_time = time.time() - start_process_batch_time
+                # if data_iter % self.logging_conf.log_freq == 0 and self.rank == 0:
+                #     logging.info(f"_process_batch time: {self.last_process_batch_time:.4f}s (iter {data_iter})")
+                # # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
                 
             batch = copy_data_to_device(batch, self.device, non_blocking=True)
             
@@ -658,21 +658,21 @@ class Trainer:
             else:
                 self.save_flag=False
             
-            # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-            start_run_chunks_time = time.time()
-            print("batch img shape", batch['images'].shape, data_iter)
-            # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            # # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            # start_run_chunks_time = time.time()
+            # print("batch img shape", batch['images'].shape, data_iter)
+            # # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
             
 
             self._run_steps_on_batch_chunks(
                 chunked_batches, phase, loss_meters
             )
             
-            # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-            run_chunks_elapsed = time.time() - start_run_chunks_time
-            if data_iter % self.logging_conf.log_freq == 0 and self.rank == 0:
-                logging.info(f"_run_steps_on_batch_chunks time: {run_chunks_elapsed:.4f}s (iter {data_iter})")
-            # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            # # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            # run_chunks_elapsed = time.time() - start_run_chunks_time
+            # if data_iter % self.logging_conf.log_freq == 0 and self.rank == 0:
+            #     logging.info(f"_run_steps_on_batch_chunks time: {run_chunks_elapsed:.4f}s (iter {data_iter})")
+            # # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
             # compute gradient and do SGD step
             assert data_iter <= limit_train_batches  # allow for off by one errors

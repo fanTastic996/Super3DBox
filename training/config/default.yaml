@@ -8,7 +8,7 @@ seed_value: 42
 accum_steps: 4 #2 # We did not use gradient accumulation in our training, while if you suffer from OOM, you can try to use it.
 patch_size: 14
 val_epoch_freq: 5
-max_img_per_gpu: 48
+max_img_per_gpu: 24 #48
 
 limit_train_batches: 400 # 800 ori
 limit_val_batches: 100 #400 ori
@@ -86,11 +86,11 @@ logging:
 
 checkpoint:
   save_dir: logs/${exp_name}/ckpts
-  save_freq: 5
-  resume_checkpoint_path: null 
-  cubify_checkpoint_path: null 
-  # resume_checkpoint_path: /data/lyq/vggt_model/model.pt #/data/lyq/vggt_model/model.pt #/YOUR/PATH/TO/CKPT
-  # cubify_checkpoint_path: /data/lyq/vggt_model/cutr_rgb.pth
+  save_freq: 20 # 5
+  # resume_checkpoint_path: null 
+  # cubify_checkpoint_path: null 
+  resume_checkpoint_path: /data/lyq/vggt_model/model.pt #/data/lyq/vggt_model/model.pt #/YOUR/PATH/TO/CKPT
+  cubify_checkpoint_path: /data/lyq/vggt_model/cutr_rgb.pth
   strict: False
 
 

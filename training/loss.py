@@ -977,6 +977,7 @@ def compute_box_logit_loss(pred_corners, pred_logits, batch):
     total_class_loss = 0
     N_seq = len(pred_corners)
     # calcudate loss for each sequence
+    # TODO: accelerate this
     for i in range(N_seq):
         pred_box_corners = pred_corners[i]
         pred_box_logits = pred_logits[i]
