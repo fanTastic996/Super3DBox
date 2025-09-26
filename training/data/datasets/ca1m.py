@@ -153,7 +153,7 @@ class CA1MDataset(BaseDataset):
             # ids = np.random.choice(
             #     self.data_store[seq_name], img_per_seq, replace=self.allow_duplicate_img
             # )
-            ids = np.array([200,200])
+            ids = np.array([200])
             # ids = np.array([190, 210])
             
             # RANDOM SAMPLE
