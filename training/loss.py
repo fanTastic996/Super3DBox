@@ -848,7 +848,7 @@ def build_3d_cost_logits(pred_corners, gt_corners, pred_logits, cost_kwargs):
     chamfer = min_pred + min_gt                # [N_pred, N_gt]
 
     # Classification (foreground encourages lower cost)
-    logit_cost = -pred_logits[:, 0].unsqueeze(1).expand(N_pred, N_gt)
+    logit_cost = -(pred_logits[:, 1].sigmoid()).unsqueeze(1).expand(N_pred, N_gt)
 
     cost = cost_kwargs['chamfer_weight'] * chamfer + cost_kwargs['class_weight'] * logit_cost
     return cost
@@ -911,7 +911,7 @@ def compute_box_logit_loss_single(
     N_pred, N_gt = pred_corners.shape[0], gt_corners.shape[0]
     
     # 创建分类标签：所有预测框初始为背景(0)
-    class_labels = torch.ones(N_pred, dtype=torch.long, device=pred_corners.device)
+    class_labels = torch.zeros(N_pred, device=pred_corners.device)
     
     chamfer_loss_val = torch.tensor(0.0, device=pred_corners.device, requires_grad=True)
     
@@ -930,10 +930,28 @@ def compute_box_logit_loss_single(
         chamfer_loss_val = chamfer_loss(matched_pred, matched_gt)
         
         # 4) 将匹配上的预测框标记为前景(0)
-        class_labels[pred_idx] = 0
+        class_labels[pred_idx] = 1.0
 
     # 5) 分类损失：对所有预测框计算交叉熵损失
-    class_loss = F.cross_entropy(pred_logits, class_labels)
+    # class_loss = F.cross_entropy(pred_logits, class_labels)
+    
+    # 5) 二分类：取前景单一logit，做 sigmoid 再算 BCE
+    # 使用 logit 差值增强数值稳定性 (等价于对前景概率做 sigmoid)
+    
+    # pred_prob = torch.sigmoid(pred_logits) # [N_pred]
+    # class_loss = F.binary_cross_entropy(pred_prob, class_labels)
+    
+    # num_classes = 2
+    # class_labels_one_hot = F.one_hot(class_labels, num_classes=num_classes).float()  # 转换为float类型
+    # 现在 class_labels_one_hot 的形状是 [100, 2]
+    # 然后计算损失
+    pos_logits = pred_logits[:, 1]  # [100]
+    num_pos = class_labels.sum().clamp(min=1)
+    num_neg = (class_labels.numel() - num_pos)
+    pos_weight = num_neg / num_pos 
+    bce = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    class_loss = bce(pos_logits, class_labels)
+        
     
     # 6) 总损失
     loss = w_box * chamfer_loss_val + w_class * class_loss

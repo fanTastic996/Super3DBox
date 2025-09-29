@@ -621,7 +621,8 @@ class AbsoluteBox3DPredictor(Predictor):
         if self.pose_type == "z":
             # Hard-code the XZ components to 0.
             box_pose = torch.cat((box_pose, torch.zeros_like(box_pose), torch.zeros_like(box_pose)), dim=-1)
-            box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'YXZ').view(batch_size, -1, 3, 3)
+            # box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'YXZ').view(batch_size, -1, 3, 3)
+            box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'ZXY').view(batch_size, -1, 3, 3) #TODO:
 
         scale_infos = sensor["depth"].info if "depth" in sensor else sensor["image"].info
 
@@ -967,37 +968,72 @@ class EncoderProposals(Prompter):
         #       (which are needed for initialization of queries).
         return (encoder_proposals, instances)
 
+    # def inference_single_image(self, output, image_size, topk):            
+    #     class_prob = output.pred_logits.sigmoid()
+    #     # class_prob = F.softmax(output.pred_logits, dim=-1)
+    #     topk_values, topk_indexes = torch.topk(class_prob.view(-1), topk)
+
+    #     # class_scores = topk_values
+    #     # topk_boxes = topk_indexes // class_prob.shape[-1]
+        
+    #     #TODO:changed 25-9-6-lyq
+    #     front_logits = class_prob[..., 1] #1
+    #     topk_scores, topk_boxes = torch.topk(front_logits.view(-1), topk)
+        
+        
+    #     labels = topk_indexes % class_prob.shape[-1]
+        
+    #     #changed by lyq 25-4-29
+    #     boxes = box_cxcywh_to_xyxy(output.pred_boxes)
+    #     # boxes = output.pred_boxes
+    #     boxes = boxes[topk_boxes]
+    #     xyz = output.pred_xyz[topk_boxes]
+    #     dims = output.pred_dims[topk_boxes]
+    #     pose = output.pred_pose[topk_boxes] #[100,3,3]
+    #     object_desc = output.object_desc[topk_boxes]
+    #     proj_xy = output.pred_proj_xy[topk_boxes]
+
+    #     #boxes[:,:2] = proj_xy #USE projective cx cy
+
+
+    #     result = Instances3D(image_size)
+            
+    #     result.scores = topk_scores #class_scores
+    #     result.pred_classes = labels
+    #     result.pred_boxes = boxes
+    #     result.pred_logits = output.pred_logits[topk_boxes]
+    #     result.pred_boxes.clip_(
+    #         min=torch.tensor([0.0, 0.0, 0.0, 0.0], device=boxes.device),
+    #         max=torch.tensor([image_size[1], image_size[0], image_size[1], image_size[0]], device=boxes.device))
+
+    #     result.pred_boxes_3d = GeneralInstance3DBoxes(
+    #         # Account for WHL ordering.
+    #         torch.cat((xyz, dims[:, [2, 1, 0]]), dim=-1),
+    #         pose)
+    #     result.object_desc = object_desc
+    #     result.pred_proj_xy = proj_xy
+        
+    #     return result
+
     def inference_single_image(self, output, image_size, topk):            
-        # class_prob = output.pred_logits.sigmoid()
-        class_prob = F.softmax(output.pred_logits, dim=-1)
+        class_prob = output.pred_logits.sigmoid()
         topk_values, topk_indexes = torch.topk(class_prob.view(-1), topk)
 
-        # class_scores = topk_values
-        # topk_boxes = topk_indexes // class_prob.shape[-1]
-        
-        #TODO:changed 25-9-6-lyq
-        front_logits = class_prob[..., 0] #1
-        topk_scores, topk_boxes = torch.topk(front_logits.view(-1), topk)
-        
-        
+        class_scores = topk_values
+        topk_boxes = topk_indexes // class_prob.shape[-1]
         labels = topk_indexes % class_prob.shape[-1]
         
-        #changed by lyq 25-4-29
         boxes = box_cxcywh_to_xyxy(output.pred_boxes)
-        # boxes = output.pred_boxes
         boxes = boxes[topk_boxes]
         xyz = output.pred_xyz[topk_boxes]
         dims = output.pred_dims[topk_boxes]
-        pose = output.pred_pose[topk_boxes] #[100,3,3]
+        pose = output.pred_pose[topk_boxes]
         object_desc = output.object_desc[topk_boxes]
         proj_xy = output.pred_proj_xy[topk_boxes]
 
-        #boxes[:,:2] = proj_xy #USE projective cx cy
-
-
         result = Instances3D(image_size)
             
-        result.scores = topk_scores #class_scores
+        result.scores = class_scores
         result.pred_classes = labels
         result.pred_boxes = boxes
         result.pred_logits = output.pred_logits[topk_boxes]
@@ -1013,7 +1049,9 @@ class EncoderProposals(Prompter):
         result.pred_proj_xy = proj_xy
         
         return result
-
+    
+    
+    
     def inference(self, prompt, output, sensor, topk):
         results = []
         for index, output_ in enumerate(output):

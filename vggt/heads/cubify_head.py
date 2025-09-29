@@ -1782,6 +1782,9 @@ class CubifyHead(nn.Module):
             
             # GT T_gravity
             sample["sensor_info"].wide.T_gravity = gravity[j]
+        #     sample["sensor_info"].wide.T_gravity =  torch.tensor([[[ 9.9998e-01, -5.3304e-03,  4.0021e-03],
+        # [ 6.6656e-03,  7.9967e-01, -6.0040e-01],
+        # [-4.3368e-19,  6.0041e-01,  7.9969e-01]]]) #200
             
             
             packaged = self.augmentor.package(sample)
@@ -1820,15 +1823,15 @@ class CubifyHead(nn.Module):
         # 特征融合
         #extract VGGT增强的3D视觉特征
         # TODO: 这个地方需要提前project吗
-        vggt_features = self.extract_image_vggt_embeds_3d_direct(aggregated_tokens_list[-2],patch_start_idx,img_H,img_W)  # [batch_size, num_frames, C, H, W]
+        # vggt_features = self.extract_image_vggt_embeds_3d_direct(aggregated_tokens_list[-2],patch_start_idx,img_H,img_W)  # [batch_size, num_frames, C, H, W]
 
 
-        vggt_features = vggt_features.view(src_flatten.shape[0],-1,vggt_features.shape[-1])  
+        # vggt_features = vggt_features.view(src_flatten.shape[0],-1,vggt_features.shape[-1])  
         
-        multiframe_fused_features = self.fusion_module(src_flatten, vggt_features)
+        # multiframe_fused_features = self.fusion_module(src_flatten, vggt_features)
         # print(f"输出尺寸: {multiframe_fused_features.shape}")  
         
-        fused_features = multiframe_fused_features #.reshape(1, -1, 256)  #[1, N*single_img_token, 256]
+        fused_features = src_flatten #multiframe_fused_features #.reshape(1, -1, 256)  #[1, N*single_img_token, 256]
         
         fused_features = rearrange(fused_features, '(b n) c d -> b (n c) d', b = N_batch, n = N_img)
         mask_flatten = mask_flatten.reshape(N_batch, -1)
@@ -1849,7 +1852,7 @@ class CubifyHead(nn.Module):
         # mask_flatten = mask_flatten.reshape(1, -1)
         # spatial_shapes = spatial_shapes.repeat(N_batch, 1)
         
-        spatial_shapes[0, 1]= spatial_shapes[0, 1]*N_img
+        spatial_shapes[0, 1] = spatial_shapes[0, 1] * N_img
         
         prompts = self.prompting.get_image_prompts(
             fused_features, mask_flatten, spatial_shapes, sensor

@@ -5,7 +5,7 @@ exp_name: exp001
 img_size: 518
 num_workers: 8 #1 #8 #1
 seed_value: 42
-accum_steps: 4 #2 # We did not use gradient accumulation in our training, while if you suffer from OOM, you can try to use it.
+accum_steps: 2 #4 #2 # We did not use gradient accumulation in our training, while if you suffer from OOM, you can try to use it.
 patch_size: 14
 val_epoch_freq: 5
 max_img_per_gpu: 24 #48
@@ -158,9 +158,9 @@ optim:
           schedulers:
             - _target_: fvcore.common.param_scheduler.LinearParamScheduler
               start_value: 1e-8
-              end_value: 5e-4 #5e-5 for original
+              end_value: 5e-5 #5e-5 for original
             - _target_: fvcore.common.param_scheduler.CosineParamScheduler
-              start_value: 5e-4 #5e-5 for original
+              start_value: 5e-5 #5e-5 for original
               end_value: 1e-8
           lengths: [0.05, 0.95]
           interval_scaling: ['rescaled', 'rescaled']

@@ -30,8 +30,8 @@ data_root = '/data/lyq/ca1m/ca1m/train-CA-1M-slam'
 # scene_id = '43649409'
 # image_names = [f"{data_root}/{scene_id}/rgb/478.png", f"{data_root}/{scene_id}/rgb/546.png"]  
 scene_id = '42444750'
-# image_names = [f"{data_root}/{scene_id}/rgb/200.png", f"{data_root}/{scene_id}/rgb/180.png"]
-image_names = [f"{data_root}/{scene_id}/rgb/200.png"]  
+image_names = [f"{data_root}/{scene_id}/rgb/190.png", f"{data_root}/{scene_id}/rgb/210.png"]
+# image_names = [f"{data_root}/{scene_id}/rgb/200.png"]  
 images = load_and_preprocess_images(image_names).to(device)
 print("images", images.shape, torch.max(images), torch.min(images))
 
@@ -77,7 +77,7 @@ with torch.no_grad():
         # print("center", bboxes_3d.gravity_center.cpu().numpy()[valid_mask])
         # print("size", bboxes_3d.dims.cpu().numpy()[valid_mask])
         # print("R", bboxes_3d.R.cpu().numpy()[valid_mask])
-        # print("scores", pred_3d_boxes.scores.cpu().numpy()[valid_mask])
+        print("scores", predictions['pred_scores'][0].cpu().numpy())
         # print(boxes_3d.R.cpu().numpy().shape,poses.shape)
         print("Saving predictions...")
         # 保存到文件

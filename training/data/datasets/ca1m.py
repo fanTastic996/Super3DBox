@@ -153,8 +153,8 @@ class CA1MDataset(BaseDataset):
             # ids = np.random.choice(
             #     self.data_store[seq_name], img_per_seq, replace=self.allow_duplicate_img
             # )
-            ids = np.array([200])
-            # ids = np.array([190, 210])
+            # ids = np.array([200])
+            ids = np.array([190, 210])
             
             # RANDOM SAMPLE
             # interval = 20
@@ -440,7 +440,7 @@ class CA1MDataset(BaseDataset):
         # 使用filter_gt_boxes.py的逻辑
         filtered_corners = self.filter_3d_corners(
             corners_array, K, poses, depth_maps,
-            frustum_threshold=4, dist_threshold=0.2
+            frustum_threshold=4, dist_threshold=0.5 #TODO:0.2
         )
 
         return filtered_corners
@@ -493,6 +493,9 @@ class CA1MDataset(BaseDataset):
                 visible_bboxes, gt_points, dist_threshold
             )
 
+            #TODO: test
+            # bbox_proximity_mask[:] = True
+            
             # 组合掩码
             final_mask = np.zeros(len(corners), dtype=bool)
             final_mask[bbox_frustum_mask] = bbox_proximity_mask
