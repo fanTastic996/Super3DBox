@@ -621,8 +621,8 @@ class AbsoluteBox3DPredictor(Predictor):
         if self.pose_type == "z":
             # Hard-code the XZ components to 0.
             box_pose = torch.cat((box_pose, torch.zeros_like(box_pose), torch.zeros_like(box_pose)), dim=-1)
-            # box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'YXZ').view(batch_size, -1, 3, 3)
-            box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'ZXY').view(batch_size, -1, 3, 3) #TODO:
+            box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'YXZ').view(batch_size, -1, 3, 3)
+            # box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'ZXY').view(batch_size, -1, 3, 3) #TODO:
 
         scale_infos = sensor["depth"].info if "depth" in sensor else sensor["image"].info
 
@@ -1169,8 +1169,13 @@ class Joiner(nn.Sequential):
 
         out = []
         for name, x in sorted(xs.items()):
+            # out.append(
+            #     NestedTensor(x, mask=torch.zeros((x.shape[0], x.shape[-2], x.shape[-1]), dtype=torch.bool, device=x.device)))
+            # TODO: change the mask
+            p_mask = torch.ones(x.shape[0], x.shape[-2], x.shape[-1], dtype=torch.bool, device=x.device)
+            p_mask[:, :sensor["image"].data.image_sizes[0][0]//16, :sensor["image"].data.image_sizes[0][1]//16] = False
             out.append(
-                NestedTensor(x, mask=torch.zeros((x.shape[0], x.shape[-2], x.shape[-1]), dtype=torch.bool, device=x.device)))
+                NestedTensor(x, mask=p_mask))
 
         return out
     
@@ -1777,7 +1782,7 @@ class FeatureFusionModule_v3(nn.Module):
         # dropout
         self.dropout = nn.Dropout(0.1)
 
-    def forward(self, clip_features, spatial_encoder_features):
+    def forward(self, clip_features, spatial_encoder_features, mask_flatten):
         """
         Args:
             clip_features: [B, N, D_clip]
@@ -1795,10 +1800,15 @@ class FeatureFusionModule_v3(nn.Module):
         spatial_encoder_value_proj = self.spatial_encoder_value_proj(spatial_encoder_features_norm)  # [B, N, D_attn]
         
         # 3. Cross-Attention 核心计算：使用CLIP的Query去查询空间编码器的Key和Value。
+        #TODO:mask for attention fusion
+        # attn_mask = torch.zeros((mask_flatten.shape[1],spatial_encoder_key_proj.shape[1]), device=clip_query_proj.device, dtype=clip_query_proj.dtype)
+        # attn_mask[mask_flatten[1],:] = float('-inf')
+        
         fused_features, attn_weights = self.cross_attention(
             query=clip_query_proj,
             key=spatial_encoder_key_proj,
-            value=spatial_encoder_value_proj
+            value=spatial_encoder_value_proj,
+            # attn_mask=attn_mask #TODO:newly added
         )
         # fused_features形状: [B, N, D_attn]
         # attn_weights形状: [B, num_heads, N_query (来自CLIP), N_key (来自空间编码器)]，表示注意力分配权重
@@ -1816,7 +1826,8 @@ class FeatureFusionModule_v3(nn.Module):
         return fused_features #, attn_weights # 返回融合后的特征和注意力权重
   
     
-
+    
+    
 
 class VGGT_CubifyTransformer(nn.Module):
     """3D目标检测/分割模型的核心模块，整合了特征提取、位置编码、提示机制和解码器"""

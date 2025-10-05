@@ -12,6 +12,20 @@ from cubifyanything.batching import BatchedPosedSensor
 
 __all__ = ["ViT"]
 
+
+def mask_from_original_size(batch_imgs, sizes_hw):
+    """
+    batch_imgs: [B, C, H, W]  pad 后的图像
+    sizes_hw: list[tuple(int,int)]  每张图 pad 前的 (h,w)
+    return: [B, H, W]  True=padding, False=valid
+    """
+    B, C, H, W = batch_imgs.shape
+    mask = torch.ones(B, H, W, dtype=torch.bool, device=batch_imgs.device)
+    for i, (h, w) in enumerate(sizes_hw):
+        h = int(min(h, H)); w = int(min(w, W))
+        mask[i, :h, :w] = False
+    return mask
+
 # NOTE: We replicate some functions here which need modifications for tracing.
 def window_partition(x, window_size):
     """

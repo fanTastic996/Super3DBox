@@ -154,7 +154,7 @@ class CA1MDataset(BaseDataset):
             #     self.data_store[seq_name], img_per_seq, replace=self.allow_duplicate_img
             # )
             # ids = np.array([200])
-            ids = np.array([190, 210])
+            ids = np.array([580, 520])
             
             # RANDOM SAMPLE
             # interval = 20
@@ -163,6 +163,7 @@ class CA1MDataset(BaseDataset):
             # start_idx = np.random.randint(0, max_start) if max_start > 0 else 0
             # # 生成等间隔的索引数组
             # ids = np.array([start_idx + i * interval for i in range(img_per_seq)])
+            # np.random.shuffle(ids) #打乱顺序
             
         image_idxs = ids  # 获取图像ID
         #TODO:
@@ -440,7 +441,7 @@ class CA1MDataset(BaseDataset):
         # 使用filter_gt_boxes.py的逻辑
         filtered_corners = self.filter_3d_corners(
             corners_array, K, poses, depth_maps,
-            frustum_threshold=4, dist_threshold=0.5 #TODO:0.2
+            frustum_threshold=4, dist_threshold=0.2 #TODO:0.5 0.2
         )
 
         return filtered_corners

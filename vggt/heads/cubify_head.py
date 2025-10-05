@@ -1823,15 +1823,16 @@ class CubifyHead(nn.Module):
         # 特征融合
         #extract VGGT增强的3D视觉特征
         # TODO: 这个地方需要提前project吗
-        # vggt_features = self.extract_image_vggt_embeds_3d_direct(aggregated_tokens_list[-2],patch_start_idx,img_H,img_W)  # [batch_size, num_frames, C, H, W]
+        vggt_features = self.extract_image_vggt_embeds_3d_direct(aggregated_tokens_list[-2],patch_start_idx,img_H,img_W)  # [batch_size, num_frames, C, H, W]
 
 
-        # vggt_features = vggt_features.view(src_flatten.shape[0],-1,vggt_features.shape[-1])  
+        vggt_features = vggt_features.view(src_flatten.shape[0],-1,vggt_features.shape[-1])  
         
-        # multiframe_fused_features = self.fusion_module(src_flatten, vggt_features)
+        multiframe_fused_features = self.fusion_module(src_flatten, vggt_features, mask_flatten)
         # print(f"输出尺寸: {multiframe_fused_features.shape}")  
         
-        fused_features = src_flatten #multiframe_fused_features #.reshape(1, -1, 256)  #[1, N*single_img_token, 256]
+        # fused_features = src_flatten # single frame
+        fused_features = multiframe_fused_features #.reshape(1, -1, 256)  #[1, N*single_img_token, 256]
         
         fused_features = rearrange(fused_features, '(b n) c d -> b (n c) d', b = N_batch, n = N_img)
         mask_flatten = mask_flatten.reshape(N_batch, -1)
