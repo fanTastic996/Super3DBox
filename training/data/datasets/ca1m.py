@@ -155,6 +155,7 @@ class CA1MDataset(BaseDataset):
             # )
             # ids = np.array([200])
             ids = np.array([580, 520])
+            # ids = np.array([520])
             
             # RANDOM SAMPLE
             # interval = 20
@@ -200,6 +201,10 @@ class CA1MDataset(BaseDataset):
         intrinsics = []      # 内参矩阵列表
         image_paths = []     # 图像路径列表
         original_sizes = []  # 原始尺寸列表
+        
+        
+        #TODO:debug only train 12 th box
+        filtered_bbox_corners = filtered_bbox_corners[12:13,...]
         
         #TODO:需要处理没有可见的GT boxes的情况
         bbox_corners = self.process_bbox_corners(filtered_bbox_corners)  # 处理边界框角点

@@ -31,6 +31,7 @@ data_root = '/data/lyq/ca1m/ca1m/train-CA-1M-slam'
 # image_names = [f"{data_root}/{scene_id}/rgb/478.png", f"{data_root}/{scene_id}/rgb/546.png"]  
 scene_id = '42444750'
 image_names = [f"{data_root}/{scene_id}/rgb/580.png", f"{data_root}/{scene_id}/rgb/520.png"]
+# image_names = [f"{data_root}/{scene_id}/rgb/520.png"]
 # image_names = [f"{data_root}/{scene_id}/rgb/210.png", f"{data_root}/{scene_id}/rgb/190.png"]
 # image_names = [f"{data_root}/{scene_id}/rgb/438.png", f"{data_root}/{scene_id}/rgb/458.png", f"{data_root}/{scene_id}/rgb/478.png"]
 # image_names = [f"{data_root}/{scene_id}/rgb/200.png"]  

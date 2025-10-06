@@ -11,6 +11,8 @@ nohup torchrun --nproc_per_node=4 launch.py > ./logs/25-9-29-training-42444750-1
 
 nohup torchrun --nproc_per_node=4 launch.py > ./logs/25-10-5-training-42444750-580-520-mask.log
 
+nohup torchrun --nproc_per_node=4 launch.py > ./logs/25-10-6-training-42444750-520-mask-12gtbox.log
+
 torchrun --nproc_per_node=2 launch.py 
 
 
