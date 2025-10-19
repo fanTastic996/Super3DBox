@@ -153,8 +153,8 @@ class CA1MDataset(BaseDataset):
             # ids = np.random.choice(
             #     self.data_store[seq_name], img_per_seq, replace=self.allow_duplicate_img
             # )
-            # ids = np.array([200])
-            ids = np.array([580, 520])
+            ids = np.array([180, 200])
+            # ids = np.array([580, 520])
             # ids = np.array([520])
             
             # RANDOM SAMPLE
@@ -204,7 +204,7 @@ class CA1MDataset(BaseDataset):
         
         
         #TODO:debug only train 12 th box
-        filtered_bbox_corners = filtered_bbox_corners[12:13,...]
+        # filtered_bbox_corners = filtered_bbox_corners[12:13,...]
         
         #TODO:需要处理没有可见的GT boxes的情况
         bbox_corners = self.process_bbox_corners(filtered_bbox_corners)  # 处理边界框角点

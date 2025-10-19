@@ -22,6 +22,10 @@ from cubifyanything.instances import Instances3D
 from cubifyanything.measurement import WhitenedDepthMeasurementInfo
 from cubifyanything.pos import CameraRayEmbedding
 from cubifyanything.transforms import euler_angles_to_matrix
+from cubifyanything.measurement import ImageMeasurementInfo, DepthMeasurementInfo
+from cubifyanything.orientation import ImageOrientation, rotate_tensor, ROT_Z
+from scipy.spatial.transform import Rotation
+
 
 import base64
 from PIL import Image
@@ -67,6 +71,45 @@ class MLP(nn.Module):
             x = F.relu(layer(x)) if i < self.num_layers - 1 else layer(x)
 
         return x
+
+
+def get_orientation(pose):
+    z_vec = pose[..., 2, :3]
+    z_orien = torch.tensor(np.array(
+        [
+            [0.0, -1.0, 0.0],  # upright
+            [-1.0, 0.0, 0.0],  # left
+            [0.0, 1.0, 0.0],  # upside-down
+            [1.0, 0.0, 0.0],
+        ]  # right
+    )).to(pose)
+
+    corr = (z_orien @ z_vec.T).T
+    corr_max = corr.argmax(dim=-1)
+
+    return corr_max
+
+def get_camera_to_gravity_transform(pose, current, target=ImageOrientation.UPRIGHT):
+    z_rot_4x4 = torch.eye(4).float()
+    z_rot_4x4[:3, :3] = ROT_Z[(current, target)]
+    pose = pose @ torch.linalg.inv(z_rot_4x4.to(pose))
+
+    # This is somewhat lazy.
+    fake_corners = DepthInstance3DBoxes(
+        np.array([[0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0]])).corners[:, [1, 5, 4, 0, 2, 6, 7, 3]]
+    fake_corners = torch.cat((fake_corners, torch.ones_like(fake_corners[..., :1])), dim=-1).to(pose)
+
+    fake_corners = (torch.linalg.inv(pose) @ fake_corners.permute(0, 2, 1)).permute(0, 2, 1)[..., :3]
+    fake_basis = torch.stack([
+        (fake_corners[:, 1] - fake_corners[:, 0]) / torch.linalg.norm(fake_corners[:, 1] - fake_corners[:, 0], dim=-1)[:, None],
+        (fake_corners[:, 3] - fake_corners[:, 0]) / torch.linalg.norm(fake_corners[:, 3] - fake_corners[:, 0], dim=-1)[:, None],
+        (fake_corners[:, 4] - fake_corners[:, 0]) / torch.linalg.norm(fake_corners[:, 4] - fake_corners[:, 0], dim=-1)[:, None],
+    ], dim=1).permute(0, 2, 1)
+
+    # this gets applied _after_ predictions to put it in camera space.
+    T = Rotation.from_euler("xz", Rotation.from_matrix(fake_basis[-1].cpu().numpy()).as_euler("yxz")[1:]).as_matrix()
+
+    return torch.tensor(T).to(pose)
 
 class NestedTensor(object):
     def __init__(self, tensors, mask):
@@ -226,7 +269,7 @@ class PreNormGlobalDecoderLayer(nn.Module):
         # self attention
         self.self_attn = nn.MultiheadAttention(d_model, n_heads, dropout=dropout)
         self.dropout2 = nn.Dropout(dropout)
-        self.norm2 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model) #保证训练稳定、防止梯度爆炸
 
         # ffn
         self.linear1 = nn.Linear(d_model, d_ffn)
@@ -234,7 +277,7 @@ class PreNormGlobalDecoderLayer(nn.Module):
         self.dropout3 = nn.Dropout(dropout)
         self.linear2 = nn.Linear(d_ffn, d_model)
         self.dropout4 = nn.Dropout(dropout)
-        self.norm3 = nn.LayerNorm(d_model)
+        self.norm3 = nn.LayerNorm(d_model) 
 
     @staticmethod
     def with_pos_embed(tensor, pos):
@@ -248,24 +291,44 @@ class PreNormGlobalDecoderLayer(nn.Module):
         src,
         src_pos_embed,
         src_spatial_shapes,
+        batch_img,
         src_padding_mask=None,
         self_attn_mask=None,
         box_attn_prior_mask=None
     ):
+        N_batch, N_img = batch_img
+        # self_attn_mask = self_attn_mask[:2].flatten()
+        Q = self_attn_mask.size(0)
+        # big_mask = torch.zeros(2*N, 2*N, dtype=torch.bool).to(self_attn_mask.device)  # 默认全 True=屏蔽
+        # big_mask[:N, :N] = self_attn_mask # 图1 的区域
+        # big_mask[N:, N:] = self_attn_mask.clone() # 图2 的区域
+        # self_attn_mask = big_mask
+        A_block = self_attn_mask.expand(N_img, N_img, Q, Q)
+        A_block = A_block.permute(0, 2, 1, 3).reshape(N_img*Q, N_img*Q)
+        A_mask = torch.block_diag(*([A_block] * N_batch))
+        off_diag = ~torch.block_diag(*([torch.ones_like(A_block)] * N_batch))
+        self_attn_mask = off_diag | A_mask
+        
+        
         # self attention
+        # 1️⃣ 自注意力：query 之间交互 让所有 queries（对象 tokens）互相沟通，理解彼此的上下文关系（比如不同物体之间的相对位置/类别信息）
         tgt2 = self.norm2(tgt)
-
-        q = k = self.with_pos_embed(tgt2, query_pos)
-
-        tgt2 = self.self_attn(
+        Ba, Nq, Nc = tgt2.shape
+        tgt2_merged = tgt2.reshape(1, Ba * Nq, Nc)
+        q = k = self.with_pos_embed(tgt2_merged, query_pos.reshape(1, Ba * Nq, Nc))
+        # nn.MultiheadAttention 的原始输入是 [seq_len, batch, embed_dim]
+        tgt2_merged = self.self_attn(
             q.transpose(0, 1),
             k.transpose(0, 1),
-            tgt2.transpose(0, 1),
+            tgt2_merged.transpose(0, 1),
             attn_mask=self_attn_mask,
         )[0].transpose(0, 1)
+        tgt2 = tgt2_merged.reshape(Ba, Nq, Nc)
         tgt = tgt + self.dropout2(tgt2)
 
+        # 2️⃣ 全局跨注意力：与图像特征交互
         # global cross attention
+        # # 让每个 query 从 encoder 的图像特征（memory）中读取与自己位置相关的特征；这里使用 GlobalCrossAttention，支持相对位置偏置 RPE（Relative Positional Encoding），并通过 reference_2d（每个 query 对应的 2D box）指导注意力范围
         if self.xattn is not None:
             tgt2 = self.norm1(tgt)
             tgt2 = self.xattn(
@@ -280,12 +343,66 @@ class PreNormGlobalDecoderLayer(nn.Module):
 
             tgt = tgt + self.dropout1(tgt2)
 
-        # ffn
+        # ffn 3️⃣ FFN 前馈网络 对每个 token 做非线性变换，增强特征表达能力
         tgt2 = self.norm3(tgt)
         tgt2 = self.linear2(self.dropout3(self.activation(self.linear1(tgt2))))
         tgt = tgt + self.dropout4(tgt2)
 
         return tgt
+    '''
+    original
+    '''
+    # def forward(
+    #     self,
+    #     tgt,
+    #     query_pos,
+    #     reference_2d,
+    #     src,
+    #     src_pos_embed,
+    #     src_spatial_shapes,
+    #     src_padding_mask=None,
+    #     self_attn_mask=None,
+    #     box_attn_prior_mask=None
+    # ):
+        
+        
+    #     # self attention
+    #     # 1️⃣ 自注意力：query 之间交互 让所有 queries（对象 tokens）互相沟通，理解彼此的上下文关系（比如不同物体之间的相对位置/类别信息）
+    #     tgt2 = self.norm2(tgt)
+
+    #     q = k = self.with_pos_embed(tgt2, query_pos)
+    #     # nn.MultiheadAttention 的原始输入是 [seq_len, batch, embed_dim]
+    #     tgt2 = self.self_attn(
+    #         q.transpose(0, 1),
+    #         k.transpose(0, 1),
+    #         tgt2.transpose(0, 1),
+    #         attn_mask=self_attn_mask,
+    #     )[0].transpose(0, 1)
+    #     tgt = tgt + self.dropout2(tgt2)
+
+    #     # 2️⃣ 全局跨注意力：与图像特征交互
+    #     # global cross attention
+    #     # # 让每个 query 从 encoder 的图像特征（memory）中读取与自己位置相关的特征；这里使用 GlobalCrossAttention，支持相对位置偏置 RPE（Relative Positional Encoding），并通过 reference_2d（每个 query 对应的 2D box）指导注意力范围
+    #     if self.xattn is not None:
+    #         tgt2 = self.norm1(tgt)
+    #         tgt2 = self.xattn(
+    #             self.with_pos_embed(tgt2, query_pos),
+    #             reference_2d,
+    #             self.with_pos_embed(src, src_pos_embed),
+    #             src,
+    #             src_spatial_shapes,
+    #             src_padding_mask,
+    #             box_attn_prior_mask=box_attn_prior_mask
+    #         )
+
+    #         tgt = tgt + self.dropout1(tgt2)
+
+    #     # ffn 3️⃣ FFN 前馈网络 对每个 token 做非线性变换，增强特征表达能力
+    #     tgt2 = self.norm3(tgt)
+    #     tgt2 = self.linear2(self.dropout3(self.activation(self.linear1(tgt2))))
+    #     tgt = tgt + self.dropout4(tgt2)
+
+    #     return tgt
 
 # This should be super vague, and take in "prompts" as queries and simply run them through
 # the underlying transformer.
@@ -303,15 +420,14 @@ class PromptDecoder(nn.Module):
 
     def forward(
         self, src, src_pos_embed, src_padding_mask, src_spatial_shapes, level_start_index, valid_ratios,
-        prompts, sensor):
+        prompts, sensor, batch, img_num):
         # Not the best assumption for now, but assume we can treat the "prompt" in a uniform manner as "reference.
         # Interleave so we have List[List[Instances]] of size # of instances x # of prompts
         # Original implementation:
-        # print("prompts[0].batch_size", prompts[0].batch_size)
-        # print("len of prompts", len(prompts))
-        # print(prompts)
         reference = [Instances3D.cat([prompt.pred[idx] for prompt in prompts if prompt.box_attn_prior_mask.any()]) for idx in range(prompts[0].batch_size)] #batch size: N
         
+        N_batch = prompts[0].batch_size
+        N_emb = src.shape[-1]
         # REVISED BY LYQ
         # reference = []
         # for idx in range(prompts[0].batch_size):
@@ -327,11 +443,18 @@ class PromptDecoder(nn.Module):
         #     # 使用Instances3D.cat处理内层列表并添加到结果中
         #     reference.append(Instances3D.cat(inner_list))
         
-
+        #cat all prompts of a batch
         prompts = Prompt.cat(prompts)        
         output = prompts.query
         intermediate = []
         intermediate_preds = []
+
+        # TODO:reshape回去
+        src=src.reshape(N_batch,-1,N_emb)
+        src_pos_embed=src_pos_embed.reshape(N_batch,-1,N_emb)
+        src_padding_mask=src_padding_mask.reshape(N_batch,-1)
+
+        image_size = sensor["image"].data.image_sizes[0]
 
         for lid, layer in enumerate(self.layers):
             # Currently, the only thing that influences the RPE is the current 2D box prediction.
@@ -339,19 +462,23 @@ class PromptDecoder(nn.Module):
             output = layer(
                 output,
                 prompts.pos_embed,
-                # For now, we only bias the attention based on the current 2D box.
+                # For now, we only bias the attention based on the current 2D box. 
                 reference_2d[:, :, None],
                 src,
                 src_pos_embed,
                 src_spatial_shapes,
+                (batch, img_num),
                 src_padding_mask,
                 prompts.self_attn_mask,
                 box_attn_prior_mask=prompts.box_attn_prior_mask
             )
-
+            # B, N_queries, C=256
             output_after_norm = self.norm(output)
 
-            pred_instances = [Instances3D(image_size) for image_size in sensor["image"].data.image_sizes]
+            # pred_instances = [Instances3D(image_size) for image_size in sensor["image"].data.image_sizes]
+            pred_instances = [Instances3D(image_size) for idx in range(N_batch)]
+            
+            
             for pred_instances_, reference_ in zip(pred_instances, reference):
                 # The previous layer's "predictions", are this rounds, "proposals"
                 pred_instances_.proposal_boxes = reference_.pred_boxes
@@ -420,7 +547,7 @@ class ScalePredictor(Predictor):
         self.shift = nn.Linear(embed_dim, 1)
         self.scale = nn.Linear(embed_dim, 1)
 
-    def forward(self, x, proposals, sensor):
+    def forward(self, x, proposals, sensor): #save in the 'sensor'
         pred_shift = torch.exp(self.shift(x[:, 0:1]))
         pred_scale = torch.exp(self.scale(x[:, 1:2]))
 
@@ -428,8 +555,12 @@ class ScalePredictor(Predictor):
         # Probably better to store on "depth", but we don't have that sensor for
         # monocular.
         scale_infos = sensor["depth"].info if "depth" in sensor else sensor["image"].info
+        # for i, info_ in enumerate(scale_infos):
+        #     info_.pred_parameters = shift_scale[i]
+        
+        #TODO: save the scale of all batches and images in all info
         for i, info_ in enumerate(scale_infos):
-            info_.pred_parameters = shift_scale[i]
+            info_.pred_parameters = shift_scale
 
         # Slice off.
         return x[:, 2:]        
@@ -558,13 +689,13 @@ class DeltaBox2DPredictor(Box2DPredictor):
 class AbsoluteBox3DPredictor(Predictor):
     def __init__(
         self,
-        embed_dim,
-        pose_type="z",
-        z_type="direct",
-        scale_shift=True,
+        embed_dim, 
+        pose_type="z", # 姿态参数化方式；当前实现用 "z" 表示重力对齐、只学习一个角（yaw）
+        z_type="direct", # 深度参数化方式（当前代码未使用；是个“占位”接口）
+        scale_shift=True, # 是否对网络输出的 z / dims 做反白化（scale/shift）恢复到物理尺度
         num_layers=3,
-        pred_proj_rel_pred_box=True,
-        clamp_xy_to_border=True):
+        pred_proj_rel_pred_box=True,  # 2D 中心偏移是相对 pred_boxes 还是 proposal_boxes 解码
+        clamp_xy_to_border=True): # 是否把 2D 投影中心 clamp 到图像边界内
         super(AbsoluteBox3DPredictor, self).__init__(embed_dim=embed_dim)
 
         self.pose_type = pose_type
@@ -573,35 +704,56 @@ class AbsoluteBox3DPredictor(Predictor):
         self.pred_proj_rel_pred_box = pred_proj_rel_pred_box
         self.clamp_xy_to_border = clamp_xy_to_border
 
-        # dxdy + z + wlh + pose
+        # 输出头的维度定义：
+        #   dx, dy (2)  —— 2D 投影中心相对偏移（归一化到盒宽高）
+        #   z       (1) —— 深度/距离（后续可能做反白化）
+        #   w, l, h (3) —— 三个尺寸（后续用 exp 保证为正，并可反白化）
+        #   pose    (1) —— 姿态（在重力对齐模式下只用一个角：yaw）
         self.center_2d_dim = 2
         self.z_dim = 1
         self.dims_dim = 3
-        self.pose_dim = 1
-
+        self.pose_dim = 3 #TODO: ori:1
+        # 头部：MLP 从 embed_dim → embed_dim → out_dim=2+1+3+1，共 3 层（含输出层）
         self.mlp = MLP(
             embed_dim,
             embed_dim,
             self.center_2d_dim + self.z_dim + self.dims_dim + self.pose_dim,
             3)
 
+        # 重要初始化：把最后一层中 dx,dy 的权重和偏置初始化为 0，
+        # 这样一开始不会改动 2D 中心（更稳定，避免训练初期的大幅偏移）。
         # dxdy init as zero.
         nn.init.constant_(self.mlp.layers[-1].weight.data[:self.center_2d_dim], 0)
         nn.init.constant_(self.mlp.layers[-1].bias.data[:self.center_2d_dim], 0)
 
     def _scale_z(self, z, info):
+        """
+        对 z 做反白化：z_scaled = scale * z + shift
+        注意：如果是 WhitenedDepthMeasurementInfo，用的是 info.parameters；
+             否则用上游预测的 info.pred_parameters（更“在线”）。
+        """
         if isinstance(info, WhitenedDepthMeasurementInfo):
             parameters = info.parameters
+        if isinstance(info, torch.Tensor):
+            parameters = info
         else:
             parameters = info.pred_parameters
 
         shift_parameters, scale_parameters = torch.split(parameters, 1, dim=-1)
         z = scale_parameters * z + shift_parameters
         return z
+    
+    
 
     def _scale_dims(self, z, info):
+        """
+        对尺寸做反白化：dims_scaled = scale * dims
+        这里只做乘法（不加偏置），假设白化时只做了尺度归一化。
+        """
         if isinstance(info, WhitenedDepthMeasurementInfo):
             parameters = info.parameters
+        if isinstance(info, torch.Tensor):
+            parameters = info
         else:
             parameters = info.pred_parameters
 
@@ -611,44 +763,73 @@ class AbsoluteBox3DPredictor(Predictor):
 
     @property
     def gravity_aligned(self):
+        # 当前仅当 pose_type == "z" 时表示“重力对齐”（只学习一个转角）
         return self.pose_type == "z"
 
     def forward(self, x, proposals, sensor):
+        # x: (B, N, embed_dim)；proposals: 长度 B 的容器；sensor 提供图像/深度及其 info
         batch_size = len(x)
+        # MLP 输出按顺序切分：dxdy(2) + z(1) + wlh(3) + pose(1)
         box_2d_deltas, box_z_unscaled, box_dims, box_pose = torch.split(
             self.mlp(x), (self.center_2d_dim, self.z_dim, self.dims_dim, self.pose_dim), dim=-1)
-
+        # === 姿态矩阵构造（重力对齐，仅一个角）===
         if self.pose_type == "z":
             # Hard-code the XZ components to 0.
-            box_pose = torch.cat((box_pose, torch.zeros_like(box_pose), torch.zeros_like(box_pose)), dim=-1)
-            box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'YXZ').view(batch_size, -1, 3, 3)
-            # box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'ZXY').view(batch_size, -1, 3, 3) #TODO:
+            # 把网络输出的单通道 box_pose 当作“yaw”，另外两个欧拉角分量强制为 0
+            # 下行拼成 (yaw, 0, 0) 的形式；后续用 'YXZ' 顺序转矩阵：
+            # 仅允许绕 Y 轴的旋转（注意：这依赖你的坐标系把“重力轴”定义为 Y）。
+            # TODO:
+            # box_pose = torch.cat((box_pose, torch.zeros_like(box_pose), torch.zeros_like(box_pose)), dim=-1)
+            # box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'YXZ').view(batch_size, -1, 3, 3) #TODO: ori
+            
+            box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'ZYX').view(batch_size, -1, 3, 3) 
 
+            
+        # 选择用于反白化的 info：优先用深度通道；否则回落到图像通道
         scale_infos = sensor["depth"].info if "depth" in sensor else sensor["image"].info
 
+        pred_scale = scale_infos[0].pred_parameters
+        # === z 的反白化 ===
         if self.scale_shift:
-            box_z_scaled = torch.stack([self._scale_z(box_z_unscaled_, info_) for box_z_unscaled_, info_ in zip(box_z_unscaled, scale_infos)], dim=0)
+            # 逐 batch 样本与其 info 配对做反白化；要求每个样本的 query 数 N 一致
+            box_z_scaled = torch.stack([self._scale_z(box_z_unscaled_, info_) for box_z_unscaled_, info_ in zip(box_z_unscaled, pred_scale)], dim=0)
         else:
-            # Assume the verbatim output is also scaled.
+            # 不做反白化时，直接将网络输出当作已缩放值使用
             box_z_scaled = box_z_unscaled
 
+        
+        # === 尺寸正值化 +（可选）反白化 ===
+        # 先裁上界再 exp，防爆；但没有下界，极小值可能导致不稳定（可按需加下界）
         box_dims = torch.exp(box_dims.clip(max=5))
+        
         if self.scale_shift:
-            box_dims = torch.stack([self._scale_dims(box_dims_unscaled_, info_) for box_dims_unscaled_, info_ in zip(box_dims, scale_infos)], dim=0)
+            box_dims = torch.stack([self._scale_dims(box_dims_unscaled_, info_) for box_dims_unscaled_, info_ in zip(box_dims, pred_scale)], dim=0)
 
+        # clamp 用的图像尺寸（H, W）
         clamp_shape = sensor["image"].data.tensor.shape[-2:]
-        for box_2d_deltas_, box_z_unscaled_, box_z_scaled_, box_dims_, box_pose_, proposals_, info_ in zip(
-                box_2d_deltas, box_z_unscaled, box_z_scaled, box_dims, box_pose, proposals, scale_infos):
+        
+        info_ = scale_infos[0]
+        #TODO:因为你并没有把图像真正的拼接起来
+        # 逐样本写回 proposals；在这里完成 2D 投影中心解码、边界裁剪以及字段挂载
+        # for box_2d_deltas_, box_z_unscaled_, box_z_scaled_, box_dims_, box_pose_, proposals_, info_ in zip(
+        #         box_2d_deltas, box_z_unscaled, box_z_scaled, box_dims, box_pose, proposals, scale_infos):
+        for box_2d_deltas_, box_z_unscaled_, box_z_scaled_, box_dims_, box_pose_, proposals_ in zip(
+                box_2d_deltas, box_z_unscaled, box_z_scaled, box_dims, box_pose, proposals):
+            # 用哪个盒来做相对偏移解码？
             if self.pred_proj_rel_pred_box:
+                # 相对 pred_boxes（需要上游已写入 proposals_.pred_boxes）
                 pred_proj_xy_ = proposals_.pred_boxes[:, :2] + box_2d_deltas_ * proposals_.pred_boxes[:, 2:]
             else:
+                # 相对 proposal_boxes（数据集中给定的候选框）
                 pred_proj_xy_ = proposals_.proposal_boxes[:, :2] + box_2d_deltas_ * proposals_.proposal_boxes[:, 2:]
 
             if self.clamp_xy_to_border:
+                # 将 2D 投影中心 clamp 到图像边界内
+                # 注意：此处上界用的是 (W, H)，若严格像素索引可考虑 (W-1, H-1)
                 pred_proj_xy_.clamp_(
                     min=torch.zeros((1, 2), device=x.device),
                     max=torch.tensor([[clamp_shape[1], clamp_shape[0]]], device=x.device))
-
+            # 将当前层的预测结果挂到 proposals_，供后续模块使用
             proposals_.pred_proj_xy = pred_proj_xy_
             proposals_.pred_z_unscaled = box_z_unscaled_
             proposals_.pred_z_scaled = box_z_scaled_
@@ -657,6 +838,8 @@ class AbsoluteBox3DPredictor(Predictor):
 
             # Hack where we move any predicted values from the info (which will be
             # overwritten by the next layer into the current layer's predictions).
+            # 将 info_ 中的“预测参数/重力”迁移到 proposals_，并清空 info_ 对应字段，
+            # 避免被下一层覆盖（下游模块请从 proposals_ 读取这些字段）
             if hasattr(info_, "pred_parameters"):
                 proposals_._pred_parameters = info_.pred_parameters
                 info_.pred_parameters = None
@@ -664,7 +847,8 @@ class AbsoluteBox3DPredictor(Predictor):
             if hasattr(info_, "pred_gravity"):
                 proposals_._pred_gravity = info_.pred_gravity
                 info_.pred_gravity = None
-
+                
+        # 返回 x（残差/后续解码仍可继续用），真正的预测已写入 proposals_
         return x
 
 class Prompter(nn.Module):
@@ -840,19 +1024,21 @@ class EncoderProposals(Prompter):
         encoder_proposals, pred_instances = self.get_proposals(src_flatten, mask_flatten, spatial_shapes, sensor)
 
         # Assume uniform number of boxes.
+        # 这个是一个专门的位置编码网络（类名叫 Box2DPromptEncoderLearned），用于把每个框 (cx, cy, w, h) 映射成对应的positional embedding 向量
+        # will clamp 2d box proposals using the clamp function as max_x=1280, max_y=1280, max_w=1280, max_h=1280
         box_2d_pos_embed = self.encoders.box_2d_encoder(torch.stack([
             pred_instances_.pred_boxes.detach() for pred_instances_ in pred_instances
         ], dim=0))
 
         batch_size, number_queries, _ = box_2d_pos_embed.shape
-        box_2d_queries = self.query_embed.weight[None, :number_queries].repeat(batch_size, 1, 1)
+        box_2d_queries = self.query_embed.weight[None, :number_queries].repeat(batch_size, 1, 1) #生成“可学习的 query 向量”，
         self_attn_mask = torch.zeros((number_queries, number_queries), dtype=torch.bool, device=box_2d_queries.device) # bool
-
-        # Guard during training against too few proposals.
+        #这里全是 False（0），意思是所有 queries 之间都可以互相注意，不屏蔽任何连接。
+        # (query pos_embed self_attn_mask)共同构成 Decoder 的输入 token 序列。
         return EncoderProposals.EncoderPrompt(
-            query=box_2d_queries,
-            pos_embed=box_2d_pos_embed,
-            self_attn_mask=self_attn_mask,
+            query=box_2d_queries, #可学习的对象原型（语义）
+            pos_embed=box_2d_pos_embed, #来自 Encoder 的 2D 框位置编码（几何）
+            self_attn_mask=self_attn_mask, #控制它们能否互相通信（允许全部通信）
             encoder_proposals=encoder_proposals,
             encoder_preds=pred_instances,
             num_one2one=self.top_k_test)
@@ -887,7 +1073,8 @@ class EncoderProposals(Prompter):
         return out_memory, out_memory_padding_mask, out_spatial_shapes
 
     def gen_encoder_output_proposals(self, memory, memory_padding_mask, spatial_shapes, sensor):
-        if self.number_levels > 1:
+        # get multi-level features
+        if self.number_levels > 1: 
             memory, memory_padding_mask, spatial_shapes = self.expand_encoder_output(
                 memory, memory_padding_mask, spatial_shapes
             )
@@ -932,20 +1119,22 @@ class EncoderProposals(Prompter):
             ~output_proposals_valid,
             max(H_, W_) * stride,
         )
-
+        # get multi-level trid 2d proposals
         output_memory = memory
         output_memory = output_memory.masked_fill(memory_padding_mask.unsqueeze(-1), float(0))
         output_memory = output_memory.masked_fill(~output_proposals_valid, float(0))
-        output_memory = self.enc_output_norm(self.enc_output(output_memory))
+        output_memory = self.enc_output_norm(self.enc_output(output_memory)) #0经过Norm之后就不是0了
 
         return output_memory, output_proposals
 
     def get_proposals(self, memory, mask_flatten, spatial_shapes, sensor):
         output_memory, box_proposals = self.gen_encoder_output_proposals(
             memory, mask_flatten, spatial_shapes, sensor) #sensor无影响
-
-        # encoder_proposals = [Instances3D(image_size) for image_size in sensor["image"].data.image_sizes for _ in range(memory.shape[0])]
-        encoder_proposals = [Instances3D(image_size) for image_size in sensor["image"].data.image_sizes]
+        # TODO
+        image_size = sensor["image"].data.image_sizes[0]
+        # according to the batch size B
+        encoder_proposals = [Instances3D(image_size) for _ in range(memory.shape[0])]
+        # encoder_proposals = [Instances3D(image_size) for image_size in sensor["image"].data.image_sizes]
         for encoder_proposals_, box_proposals_ in zip(encoder_proposals, box_proposals):
             # We call these anchors because they follow some spatial prior.
             encoder_proposals_.proposal_boxes = box_proposals_
@@ -968,60 +1157,20 @@ class EncoderProposals(Prompter):
         #       (which are needed for initialization of queries).
         return (encoder_proposals, instances)
 
-    # def inference_single_image(self, output, image_size, topk):            
-    #     class_prob = output.pred_logits.sigmoid()
-    #     # class_prob = F.softmax(output.pred_logits, dim=-1)
-    #     topk_values, topk_indexes = torch.topk(class_prob.view(-1), topk)
+    
 
-    #     # class_scores = topk_values
-    #     # topk_boxes = topk_indexes // class_prob.shape[-1]
-        
-    #     #TODO:changed 25-9-6-lyq
-    #     front_logits = class_prob[..., 1] #1
-    #     topk_scores, topk_boxes = torch.topk(front_logits.view(-1), topk)
-        
-        
-    #     labels = topk_indexes % class_prob.shape[-1]
-        
-    #     #changed by lyq 25-4-29
-    #     boxes = box_cxcywh_to_xyxy(output.pred_boxes)
-    #     # boxes = output.pred_boxes
-    #     boxes = boxes[topk_boxes]
-    #     xyz = output.pred_xyz[topk_boxes]
-    #     dims = output.pred_dims[topk_boxes]
-    #     pose = output.pred_pose[topk_boxes] #[100,3,3]
-    #     object_desc = output.object_desc[topk_boxes]
-    #     proj_xy = output.pred_proj_xy[topk_boxes]
-
-    #     #boxes[:,:2] = proj_xy #USE projective cx cy
-
-
-    #     result = Instances3D(image_size)
-            
-    #     result.scores = topk_scores #class_scores
-    #     result.pred_classes = labels
-    #     result.pred_boxes = boxes
-    #     result.pred_logits = output.pred_logits[topk_boxes]
-    #     result.pred_boxes.clip_(
-    #         min=torch.tensor([0.0, 0.0, 0.0, 0.0], device=boxes.device),
-    #         max=torch.tensor([image_size[1], image_size[0], image_size[1], image_size[0]], device=boxes.device))
-
-    #     result.pred_boxes_3d = GeneralInstance3DBoxes(
-    #         # Account for WHL ordering.
-    #         torch.cat((xyz, dims[:, [2, 1, 0]]), dim=-1),
-    #         pose)
-    #     result.object_desc = object_desc
-    #     result.pred_proj_xy = proj_xy
-        
-    #     return result
-
-    def inference_single_image(self, output, image_size, topk):            
-        class_prob = output.pred_logits.sigmoid()
+    def inference_single_image(self, output, image_size, topk):           
+        #TODO: ori: 
+        class_prob = output.pred_logits.sigmoid() 
+        topk_values, topk_indexes = torch.topk(class_prob.view(-1), topk)
+        labels = topk_indexes % class_prob.shape[-1]
+        ################################################
+        class_prob = output.pred_logits.sigmoid()[:, 1]
         topk_values, topk_indexes = torch.topk(class_prob.view(-1), topk)
 
         class_scores = topk_values
-        topk_boxes = topk_indexes // class_prob.shape[-1]
-        labels = topk_indexes % class_prob.shape[-1]
+        topk_boxes = topk_indexes 
+        # labels = topk_indexes % class_prob.shape[-1]
         
         boxes = box_cxcywh_to_xyxy(output.pred_boxes)
         boxes = boxes[topk_boxes]
@@ -1052,22 +1201,66 @@ class EncoderProposals(Prompter):
     
     
     
-    def inference(self, prompt, output, sensor, topk):
+    def inference(self, output, sensor, topk, intrinsic, extrinsic, gravity):
         results = []
+        N_batch = intrinsic.shape[0]
+        N_img = intrinsic.shape[1]
+        intrinsic = intrinsic.reshape(-1,3,3)
+        extrinsic = extrinsic.reshape(-1,3,4)
+        # 创建底行 [0, 0, 0, 1]
+        bottom = torch.tensor([0, 0, 0, 1], dtype=extrinsic.dtype, device=extrinsic.device)
+        bottom = bottom.view(1, 1, 4).repeat(extrinsic.shape[0], 1, 1)  # [N,1,4]
+        # 拼接到 extrinsic 下方
+        extrinsic_cat = torch.cat([extrinsic, bottom], dim=1)  # [N,4,4]
+        extrinsic_homo = torch.linalg.inv(extrinsic_cat)
+        
+        # output的第一维度应该是N_batch * N_img
+        batch_output = []
         for index, output_ in enumerate(output):
-            info = sensor["image"].sensor[index]
+            # 遍历每一张图像
+            # info = sensor["image"].sensor[index]
 
-            K = info.image.K[-1:].repeat(len(output_), 1, 1)
+            # K = info.image.K[-1:].repeat(len(output_), 1, 1)
+            K = intrinsic[index:index+1].repeat(len(output_), 1, 1)
+            
             output_xyz = torch.bmm(
                 torch.linalg.inv(K), torch.cat((output_.pred_z_scaled * output_.pred_proj_xy, output_.pred_z_scaled), dim=-1)[..., None])[..., 0]
+            
+            # using the T_gravity from VGGT camera poses
+            # RT=extrinsic_homo[index:index+1]
+            # current_orientation = ImageOrientation(get_orientation(RT)[-1].item())   
+            # target_orientation = ImageOrientation.UPRIGHT
+            # T_gravity = get_camera_to_gravity_transform(RT[-1], current_orientation, target=target_orientation)
+            # T_gravity = T_gravity.unsqueeze(0)
+            # # output_xyz = (T_gravity @ output_xyz.unsqueeze(-1) ).squeeze()
+            # output_.pred_pose = T_gravity @ output_.pred_pose
 
-            output_.pred_xyz = output_xyz
+            
+            
 
-            if info.has("T_gravity"):
-                output_.pred_pose = info.T_gravity[-1:] @ output_.pred_pose
+            # TODO: ori
+            # if info.has("T_gravity"):
+                # output_.pred_pose = info.T_gravity[-1:] @ output_.pred_pose
+            
+            # using the T_gravity from camera head
+            output_.pred_pose = gravity[index//N_img, index % N_img].unsqueeze(0) @ output_.pred_pose
+            
+            
+            
+            # Transform to world space
+            R = extrinsic_homo[index, :3, :3]
+            t = extrinsic_homo[index, :3, 3]
+            output_xyz_world = (output_xyz @ R.T) + t
+            output_.pred_pose = torch.matmul(R[None, :, :], output_.pred_pose)
+            output_.pred_xyz = output_xyz_world  #output_xyz
+
+            batch_output.append(output_)
                 
-
-            results.append(self.inference_single_image(output_, sensor["image"].data.image_sizes[index], topk=topk))
+                
+            if (index+1) % N_img==0:
+                batch_output = Instances3D.cat(batch_output)
+                results.append(self.inference_single_image(batch_output, sensor["image"].data.image_sizes[index], topk=topk))
+                batch_output=[]
 
         return results
 
@@ -1094,10 +1287,18 @@ class CubifyAnythingPrompting(nn.Module):
             src_flatten,
             mask_flatten,
             spatial_shapes,
-            sensor):
+            sensor,
+            N_batch,
+            N_img,
+            embedding_dim):
 
         prompts = []
+        prompts_0 = []
+        prompts_1 = []
+        src_flatten = src_flatten.reshape(N_batch*N_img, -1, embedding_dim)
+        mask_flatten = mask_flatten.reshape(N_batch*N_img, -1)
         for prompter in self.prompters:
+    
             prompt = prompter(src_flatten, mask_flatten, spatial_shapes, sensor)
             if prompt is not None:
                 prompts.append(prompt)
@@ -1827,390 +2028,6 @@ class FeatureFusionModule_v3(nn.Module):
   
     
     
-    
-
-class VGGT_CubifyTransformer(nn.Module):
-    """3D目标检测/分割模型的核心模块，整合了特征提取、位置编码、提示机制和解码器"""
-    
-    def __init__(
-        self,
-        backbone,       # 特征提取主干网络（如ViT）
-        prompting,      # 提示生成机制组件
-        decoder,        # 解码器（包含注意力机制和预测头）
-        pixel_mean,     # 图像归一化均值
-        pixel_std,      # 图像归一化标准差
-        pos_embedding,  # 位置编码模块
-        vggt_model,  # VGGT模型（用于特征融合）
-        fusion_module,  # 特征融合模块
-        vggt_merger,  # VGGT特征合并器
-        frame_merger, # 帧特征合并器
-        depth_model = False,
-        sensor_name="wide", # 使用的传感器类型
-        topk_per_image=100  # 每张图像保留的最大预测数
-    ):
-        super().__init__()
-        # 基础组件初始化
-        self.backbone = backbone
-        self.prompting = prompting
-        self.decoder = decoder
-        self.pos_embedding = pos_embedding
-        #added
-        self.vggt_model = vggt_model  # VGGT模型
-        self.fusion_module = fusion_module  # 特征融合模块
-        self.vggt_merger = vggt_merger  # VGGT特征合并器
-        self.frame_merger = frame_merger  # 帧特征合并器
-        self.depth_model = depth_model  # 深度模型（可选）
-        # 注册图像归一化参数（自动跟随模型设备移动）
-        self.register_buffer("pixel_mean", torch.tensor(pixel_mean).view(-1, 1, 1), False)
-        self.register_buffer("pixel_std", torch.tensor(pixel_std).view(-1, 1, 1), False)
-        assert self.pixel_mean.shape == self.pixel_std.shape, "归一化参数形状不匹配"
-
-        # 多尺度特征投影
-        self.input_proj = nn.ModuleList([
-            nn.Sequential(
-                nn.Conv2d(backbone.num_channels[0], decoder.embed_dim, kernel_size=1),  # 通道维度转换
-                nn.GroupNorm(32, decoder.embed_dim),  # 分组归一化
-            )
-        ])
-        self.level_embed = nn.Parameter(torch.Tensor(len(backbone.num_channels), decoder.embed_dim))  # 多尺度级别嵌入
-        self.sensor_name = sensor_name
-        self.topk_per_image = topk_per_image
-
-    @property
-    def device(self):
-        """返回模型所在设备（通过pixel_mean自动获取）"""
-        return self.pixel_mean.device
-
-    def _flatten(self, srcs, pos_embeds, masks):
-        """将多尺度特征展平为适合Transformer的序列格式
-        Args:
-            srcs: 多尺度特征图列表 [ (B, C, H, W) ]
-            pos_embeds: 位置编码列表
-            masks: 掩码列表
-        Returns:
-            src_flatten: 展平的特征序列 (B, L, C)
-            ... # 其他返回参数见下方
-        """
-        src_flatten, mask_flatten, lvl_pos_embed_flatten = [], [], []
-        spatial_shapes = []  # 存储各尺度特征图空间尺寸
-        
-        # 遍历每个尺度的特征
-        for lvl, (src, pos_embed, mask) in enumerate(zip(srcs, pos_embeds, masks)):
-            bs, c, h, w = src.shape
-            spatial_shapes.append((h, w))
-            # 展平特征和位置编码 (B, C, H, W) -> (B, H*W, C)
-            src = src.flatten(2).transpose(1, 2)
-            pos_embed = pos_embed.flatten(2).transpose(1, 2)
-            mask = mask.flatten(1)  # 展平掩码
-            # 添加层级嵌入信息
-            lvl_pos_embed = pos_embed + self.level_embed[lvl].view(1, 1, -1)
-            
-            # 收集结果
-            lvl_pos_embed_flatten.append(lvl_pos_embed)
-            src_flatten.append(src)
-            mask_flatten.append(mask)
-        
-        # 拼接所有尺度的特征/位置编码/掩码
-        src_flatten = torch.cat(src_flatten, 1)
-        mask_flatten = torch.cat(mask_flatten, 1)
-        lvl_pos_embed_flatten = torch.cat(lvl_pos_embed_flatten, 1)
-        
-        # 生成多尺度特征的索引信息
-        spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=src.device)
-        level_start_index = torch.cat((spatial_shapes.new_zeros((1,)), spatial_shapes.prod(1).cumsum(0)[:-1]))
-        valid_ratios = torch.stack([get_valid_ratio(m) for m in masks], 1)  # 有效区域比例
-        
-        return src_flatten, lvl_pos_embed_flatten, mask_flatten, spatial_shapes, level_start_index, valid_ratios
-
-    def inference(
-        self,
-        batched_sensors,  # 批处理的传感器数据字典
-        do_preprocess: bool = True,  # 是否执行预处理（保留接口）
-        do_postprocess: bool = True,  # 是否执行后处理（保留接口）
-    ):
-        """推理流程：特征提取→提示生成→解码预测"""
-        assert not self.training, "推理必须在eval模式下运行"
-        
-        img_path = batched_sensors["meta"]['img_path']
-        print("img_path:", img_path)
-        vggt_image = load_and_preprocess_images(img_path) #(N, 3, H, W) 
-
-        vggt_image = vggt_image.to("cuda")  # 将图像移动到GPU
-        # vggt_images = [vggt_image[i] for i in range(vggt_image.shape[0])]
-        vggt_images = [vggt_image] #[B, N, 3, H, W]
-        
-        self.vggt_model.eval()
-        
-        # 1. 特征提取（主干网络）
-        sensor = batched_sensors[self.sensor_name]
-        #added but got input of size: [1, 6, 3, 512, 512]
-        sensor['image'].data.tensor = sensor['image'].data.tensor.squeeze()
-        print("sensor:", sensor['image'].data.tensor.shape)
-        if self.depth_model:
-            sensor['depth'].data.tensor = sensor['depth'].data.tensor.squeeze()
-            print("sensor:", sensor['depth'].data.tensor.shape)
-        features = self.backbone(sensor)
-        
-        # 2. 准备多尺度特征
-        srcs, masks, pos_embeds = [], [], []
-        for l, (feat, info_) in enumerate(zip(features, sensor["image"].info)):
-            # 计算位置编码（融合相机参数）
-            pos_embeds_ = self.pos_embedding(feat, sensor)
-            pos_embeds.append(pos_embeds_)
-            
-            # 分离特征和掩码
-            src, mask = feat.decompose()
-            # 投影到解码器维度
-            srcs.append(self.input_proj[l](src))
-            masks.append(mask)
-        
-        # 3. 展平特征（适配Transformer结构）
-        flattened = self._flatten(srcs, pos_embeds, masks)
-        src_flatten, lvl_pos_embed, mask_flatten, spatial_shapes, level_start_index, valid_ratios = flattened  
-        # src_flatten torch.Size([1, 1024, 256])
-
-        # extra processing temporary
-        mask_flatten = mask_flatten[:1]  #[1,1024]
-        valid_ratios = valid_ratios[:1] #[1,1,2]
-        
-        # 特征融合
-        #extract VGGT增强的3D视觉特征
-        vggt_features = self.extract_image_vggt_embeds_3d(vggt_images)  # [batch_size, num_frames, C, H, W]
-        print('src_flatten',src_flatten.shape) # [1*N, 1024, 256]
-        print('vggt_features',vggt_features.shape)  # [266*N, 2048]
-        vggt_features = vggt_features.view(src_flatten.shape[0],-1,vggt_features.shape[-1])  # [1*N, 266, 2048]
-        multiframe_fused_features = self.fusion_module(src_flatten, vggt_features)
-        print(f"输出尺寸: {multiframe_fused_features.shape}")  
-        
-        #fuse multiframe features
-        fused_features = self.frame_merger(multiframe_fused_features)  # [1*N, 1024, 256] -> [1, 1024, 256]
-
-        # 4. 生成提示（Prompt）
-        '''
-        Prompter的核心作用是根据图像特征生成​​物体查询（Object Queries）​​，这些查询作为Decoder的输入，承载了模型对场景中“可能存在哪些物体”的初始假设。其本质是一种​​物体候选生成器​​，类似于2D检测中的Region Proposal Network（RPN）
-        '''
-        prompts = self.prompting.get_image_prompts(
-            fused_features, mask_flatten, spatial_shapes, sensor
-        )  #modules objects
-        prompters = self.prompting.prompters  #Modules structure
-
-        # 5. 解码器处理（核心预测流程）
-        '''
-        Decoder接收Prompter生成的Object Queries，通过与图像特征的交互（注意力机制）逐步优化这些查询，最终输出精确的3D检测结果
-        '''
-        _, intermediate_preds = self.decoder(
-            fused_features, lvl_pos_embed, mask_flatten, spatial_shapes, 
-            level_start_index, valid_ratios, prompts, sensor
-        )
-        
-        # 6. 处理最后层输出
-        prompt_outputs = intermediate_preds[-1]
-        prompt_start_idx = 0
-        results = None
-        
-        # 7. 遍历所有提示器生成最终预测
-        for prompter_index, (prompt, prompter) in enumerate(zip(prompts, prompters)):
-            # 提取当前提示器对应的输出
-            prompt_outputs_ = [
-                pred[prompt_start_idx:prompt_start_idx+prompt.number_prompts] 
-                for pred in prompt_outputs
-            ]
-            
-            # 仅处理需要输出的提示
-            if prompt.has_output:
-                # 调用提示器的推理方法（如框预测、分割等）
-                results = prompter.inference(
-                    prompt, prompt_outputs_, sensor, 
-                    topk=self.topk_per_image
-                )
-                prompt_start_idx += prompt.number_prompts
-                break  # 通常只有一个提示器产生输出
-        
-        return results
-
-    def forward(self, batched_inputs, do_postprocess=True):
-        """训练/推理的统一入口（实际调用推理函数）"""
-        return self.inference(batched_inputs)
-
-    def extract_image_vggt_embeds_3d(
-        self,
-        images_vggt # 输入图像序列 [batch_size, num_frames, C, H, W]
-    ):
-        """
-        提取VGGT增强的3D视觉特征 (image_embeds_3d)
-        返回形状: [N, 2048] (N = batch_size * num_frames * h_grid_after_merge * w_grid_after_merge)
-        """
-        batch_size = len(images_vggt)
-        image_embeds_3d = []  # 存储每张图像的3D特征
-        
-        # 确保VGGT处于评估模式（禁用dropout等训练专用层）
-        self.vggt_model.eval()
-        
-        for i in range(batch_size):
-            if images_vggt[i].shape[0] > 0:  # 检查有效图像输入
-                n_image = images_vggt[i].shape[0]  # 当前batch的帧数
-                height, width = images_vggt[i].shape[-2:]  # 图像原始分辨率
-                
-                # 获取视觉配置参数
-                patch_size = 14 #self.config.vision_config.patch_size
-                merge_size = 2 #self.config.vision_config.spatial_merge_size
-                
-                # 计算分块网格尺寸
-                h_grid, w_grid = height // patch_size, width // patch_size
-                h_grid_after_merge = h_grid // merge_size
-                w_grid_after_merge = w_grid // merge_size
-                
-                # 自动选择混合精度（根据GPU能力）
-                dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
-                
-                with torch.no_grad(), torch.cuda.amp.autocast(dtype=dtype):
-                    # === 核心特征提取流程 ===
-                    # 1. 时间翻转（若参考帧非首帧）
-                    # if not self.config.reference_frame == "first":
-                    #     images_vggt[i] = torch.flip(images_vggt[i], dims=(0))
-                    
-                    # 2. VGGT特征提取
-                    # 使用聚合器提取特征
-                    aggregated_tokens_list, patch_start_idx = self.vggt_model.aggregator(images_vggt[i][None])
-                    features = aggregated_tokens_list[-2][0, :, patch_start_idx:]
-                    
-                    # 3. 时间维度校正
-                    # if not self.config.reference_frame == "first":
-                    #     features = torch.flip(features, dims=(0))
-                    
-                    # 4. 空间特征重组
-                    print("features",features.shape)
-                    print('debug',n_image,h_grid, w_grid)
-                    features = features.view(n_image, h_grid, w_grid, -1)
-                    features = features[:, :h_grid_after_merge * merge_size, 
-                                    :w_grid_after_merge * merge_size, :].contiguous()
-                    features = features.view(n_image, h_grid_after_merge, merge_size, 
-                                        w_grid_after_merge, merge_size, -1)
-                    features = features.permute(0, 1, 3, 2, 4, 5).contiguous()
-                    
-                    # 5. 通过PatchMerger降采样（关键步骤）
-                    features = self.vggt_merger(features)#.to(self.visual.dtype))
-                    image_embeds_3d.append(features)
-        
-        # 6. 批量特征拼接
-        return torch.cat(image_embeds_3d, dim=0)#.to(self.visual.dtype)
-
-    
-def make_vggt_cubify_transformer(vggt_model, dimension, depth_model, embed_dim=256):
-    """模型构造工厂函数
-    Args:
-        dimension: 主干网络特征维度（768/384/192）
-        depth_model: 是否使用深度模型
-        embed_dim: 解码器嵌入维度（默认256）
-    """
-    dimension_to_heads = {
-        # ViT-B
-        768: 12,
-        # ViT-S
-        384: 6,
-        # ViT-T
-        192: 3
-    }
-    
-    
-    model = VGGT_CubifyTransformer(
-        backbone=Joiner(
-            backbone=ViT(
-                img_size=None,
-                patch_size=16,
-                embed_dim=dimension,
-                depth=12,
-                num_heads=dimension_to_heads[dimension],
-                window_size=16,
-                mlp_ratio=4,
-                qkv_bias=True,
-                norm_layer=partial(nn.LayerNorm, eps=1e-6),
-                window_block_indexes=[
-                    0,
-                    1,
-                    3,
-                    4,
-                    6,
-                    7,
-                    9,
-                    10,
-                ],
-                residual_block_indexes=[],
-                use_rel_pos=False,
-                out_feature="last_feat",
-                depth_modality=depth_model,
-                depth_window_size=None,
-                layer_scale=not depth_model,
-                encoder_norm=not depth_model,
-                pretrain_img_size=512 if not depth_model else 224
-            )),            
-        pos_embedding=CameraRayEmbedding(dim=embed_dim),
-        prompting=CubifyAnythingPrompting(
-            embed_dim=embed_dim,
-            prompters=[
-                MetricQueries(
-                    input_channels=embed_dim,
-                    input_stride=16,
-                    predictors=None),            
-                EncoderProposals(
-                    input_channels=embed_dim,
-                    input_stride=16,
-                    level_strides=[16, 32, 64],
-                    predictors=[
-                        # Technically, this only gets supervised for 1 class (foreground).
-                        ClassPredictor(embed_dim=embed_dim, num_classes=2, num_layers=None),
-                        DeltaBox2DPredictor(embed_dim=embed_dim, num_layers=3),
-                    ],
-                    top_k_test=300,
-                ),
-            ],
-            encoders=PromptEncoders(
-                box_2d_encoder=Box2DPromptEncoderLearned(embed_dim=embed_dim)
-            )
-        ),
-        decoder=PromptDecoder(
-            embed_dim=embed_dim,
-            layer=PreNormGlobalDecoderLayer(
-                xattn=GlobalCrossAttention(
-                    dim=embed_dim,
-                    num_heads=8,
-                    rpe_hidden_dim=512,
-                    rpe_type="linear",
-                    feature_stride=16),
-                d_model=embed_dim,
-                d_ffn=2048, # for self-attention.
-                dropout=0.0,
-                activation=F.relu,
-                n_heads=8), # for self-attention.
-            num_layers=6,
-            predictors=[
-                ScalePredictor(embed_dim=embed_dim),
-                ClassPredictor(embed_dim=embed_dim, num_classes=2, num_layers=None),
-                DeltaBox2DPredictor(embed_dim=embed_dim, num_layers=3),
-                AbsoluteBox3DPredictor(
-                    embed_dim=embed_dim, num_layers=3, pose_type="z", z_type="direct", scale_shift=True)
-            ],
-            norm=nn.LayerNorm(embed_dim)),
-        #specialized for vggt spatial features
-        vggt_model=vggt_model,  # VGGT模型（用于特征融合）
-        # fusion_module=FeatureFusionModule(fusion_type='add'),
-        fusion_module=FeatureFusionModule(fusion_type='add'),
-        vggt_merger=VGGTMerger(
-                    output_dim=2048, #config.hidden_size, #2048
-                    hidden_dim=4096, #getattr(config, "vggt_merger_hidden_dim", 4096), #4096
-                    context_dim=2048,
-                    spatial_merge_size=2 #config.vision_config.spatial_merge_size, # 2
-                ),
-        frame_merger=AttentionFusionWithTorch(embed_dim=256, num_heads=8),
-        
-        pixel_mean=[123.675, 116.28, 103.53],
-        pixel_std=[58.395, 57.12, 57.375],
-        depth_model=depth_model)
-    
-    return model
-
-
-
         
     
 if __name__ == "__main__":

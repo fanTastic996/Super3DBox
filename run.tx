@@ -11,10 +11,14 @@ nohup torchrun --nproc_per_node=4 launch.py > ./logs/25-9-29-training-42444750-1
 
 nohup torchrun --nproc_per_node=4 launch.py > ./logs/25-10-5-training-42444750-580-520-mask.log
 
-nohup torchrun --nproc_per_node=4 launch.py > ./logs/25-10-6-training-42444750-520-mask-12gtbox.log
+nohup torchrun --nproc_per_node=4 launch.py > ./logs/25-10-6-training-42444750-520-mask-12gtbox-changeconfig.log
 
-torchrun --nproc_per_node=2 launch.py 
+nohup torchrun --nproc_per_node=4 launch.py > ./logs/25-10-6-training-42444750-520-mask-12gtbox-only1600-first.log 
 
+torchrun --nproc_per_node=4 launch.py 
+
+
+nohup torchrun --nproc_per_node=4 launch.py > ./logs/25-10-18-training-42444750-580-520-new.log
 
 tensorboard --logdir=./logs --port=6006
 
@@ -39,3 +43,8 @@ start training using the new fusion module
 
 25-9-27:
 1.放宽了depth filtering gt boxes的要求
+
+正在训练：
+1.decoder全随机初始化，box pred_pose 1DOF->3DOF，'ZYX', 用camera head预测的gravity
+TODO:
+1.decoder全随机初始化，box pred_pose 1DOF->3DOF，'ZYX', *不用*camera head预测的gravity

@@ -166,7 +166,7 @@ def gravity_encoding_to_extri_intri(
 
     if pose_encoding_type == "absT_quaR_FoV":
         #added to avg the multi-view encodings
-        pose_encoding = torch.mean(pose_encoding, dim=1, keepdim=True)
+        # pose_encoding = torch.mean(pose_encoding, dim=1, keepdim=True)
         
         T = pose_encoding[..., :3]
         quat = pose_encoding[..., 3:7]

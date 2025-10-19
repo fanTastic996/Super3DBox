@@ -91,7 +91,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                             ClassPredictor(embed_dim=cubify_embed_dim, num_classes=2, num_layers=None),
                             DeltaBox2DPredictor(embed_dim=cubify_embed_dim, num_layers=3),
                         ],
-                        top_k_test=300,
+                        top_k_test=100, #300,
                     ),
                 ],
                 encoders=PromptEncoders(
@@ -100,8 +100,15 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
             ),
             decoder=PromptDecoder(
                 embed_dim=cubify_embed_dim,
+                #几何感知的 Transformer 解码层
+                # Self-Attention：让 queries 之间通信；
+                # GlobalCrossAttention：让每个 query 聚焦自己 2D 框对应的图像特征；
+                 #FFN：非线性特征增强；
+                # LayerNorm + 残差：稳定训练。
+                # 堆叠 6 层后构成整个 Decoder，用于多轮 refinement（从粗框到精框，从 2D 到 3D）。
                 layer=PreNormGlobalDecoderLayer(
-                    xattn=GlobalCrossAttention(
+                    # 这个模块是用相对位置偏置 (Relative Position Encoding, RPE) 来计算注意力，使得 cross-attention 能考虑 query 的 2D 投影与图像特征位置的关系。它本质上就是 DETR 的跨注意力，但带有 box-aware 位置引导。
+                    xattn=GlobalCrossAttention( 
                         dim=cubify_embed_dim,
                         num_heads=8,
                         rpe_hidden_dim=512,
@@ -207,8 +214,9 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
 
             if self.box_head is not None:
                 # [Seq, N_img, ...]
-                # extract ex and in trinsics [Seq, N, 3, 4/3]
+                # extract ex and intrinsics [Seq, N, 3, 4/3]
                 extrinsic, intrinsic = pose_encoding_to_extri_intri(predictions["pose_enc"], images.shape[-2:])
+                
                 gravity_init, _ = gravity_encoding_to_extri_intri(predictions["gravity_enc"], images.shape[-2:]) #[B,1,3,4]
                 gravity = gravity_init[:,:,:3,:3] #[B,1,3,3]
                 
