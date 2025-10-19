@@ -158,3 +158,5 @@ examples/
 vis_results/
 
 *.png
+
+training/config/*
