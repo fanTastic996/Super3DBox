@@ -581,7 +581,6 @@ class CubifyHead(nn.Module):
             if intrinsic is not None and extrinsic is not None:
                 sample["sensor_info"].wide.image = sample["sensor_info"].wide.image.resize((img_H, img_W))  #TODO: changed img_H, img_W
                 sample["sensor_info"].wide.image.K[0,:3,:3] = intrinsic[j,0].detach().cpu()[:3,:3]
-                
             
             # GT T_gravity
             # sample["sensor_info"].wide.T_gravity = gravity[j]
@@ -648,7 +647,6 @@ class CubifyHead(nn.Module):
         vggt_features = vggt_features.view(src_flatten.shape[0],-1,vggt_features.shape[-1])  
         
         multiframe_fused_features = self.fusion_module(src_flatten, vggt_features, mask_flatten)
-        # print(f"输出尺寸: {multiframe_fused_features.shape}")  
         
         # fused_features = src_flatten # single frame
         fused_features = multiframe_fused_features #.reshape(1, -1, 256)  #[1, N*single_img_token, 256]

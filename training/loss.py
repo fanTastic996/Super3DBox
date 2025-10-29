@@ -818,6 +818,59 @@ def build_3d_cost(pred_corners, gt_corners):
 #             cost[i, j] = cost_kwargs['chamfer_weight'] * chamfer_ij + cost_kwargs['class_weight'] * logit_cost
 #     return cost
 
+# ===== 你已有的工具函数（保持不变） =====
+def corners_to_aabb(corners: torch.Tensor):
+    mins = corners.min(dim=-2).values
+    maxs = corners.max(dim=-2).values
+    return mins, maxs
+
+def aabb_volume(mins: torch.Tensor, maxs: torch.Tensor):
+    side = (maxs - mins).clamp(min=0.0)
+    return side[..., 0] * side[..., 1] * side[..., 2]
+
+# ===== 新增：成对两两 GIoU (pred: [N,8,3], gt: [M,8,3]) =====
+@torch.no_grad()  # 如需反传梯度，去掉本行
+def pairwise_giou_3d_from_corners(pred_corners: torch.Tensor,
+                                  gt_corners: torch.Tensor):
+    """
+    pred_corners: [N, 8, 3]
+    gt_corners  : [M, 8, 3]
+    return:
+      giou_mat: [N, M]
+      iou_mat : [N, M]
+    """
+    assert pred_corners.ndim == 3 and pred_corners.shape[1:] == (8, 3)
+    assert gt_corners.ndim == 3 and gt_corners.shape[1:] == (8, 3)
+
+    # 转 AABB
+    p_mins, p_maxs = corners_to_aabb(pred_corners)  # [N,3]
+    g_mins, g_maxs = corners_to_aabb(gt_corners)    # [M,3]
+
+    # 单体积
+    vol_p = aabb_volume(p_mins, p_maxs)             # [N]
+    vol_g = aabb_volume(g_mins, g_maxs)             # [M]
+
+    # 交集体积（广播到 [N,M,3]）
+    inter_mins = torch.maximum(p_mins[:, None, :], g_mins[None, :, :])  # [N,M,3]
+    inter_maxs = torch.minimum(p_maxs[:, None, :], g_maxs[None, :, :])  # [N,M,3]
+    inter = aabb_volume(inter_mins, inter_maxs)                          # [N,M]
+
+    # 并集体积
+    union = vol_p[:, None] + vol_g[None, :] - inter                      # [N,M]
+
+    # IoU
+    eps = torch.finfo(pred_corners.dtype).eps if pred_corners.is_floating_point() else 1e-12
+    iou = inter / (union + eps)
+
+    # 最小包围盒 C：对每一对 (i,j) 取联合 AABB
+    c_mins = torch.minimum(p_mins[:, None, :], g_mins[None, :, :])       # [N,M,3]
+    c_maxs = torch.maximum(p_maxs[:, None, :], g_maxs[None, :, :])       # [N,M,3]
+    vol_c = aabb_volume(c_mins, c_maxs).clamp(min=eps)                   # [N,M]
+
+    giou = iou - (vol_c - union) / vol_c                                 # [N,M]
+    return giou
+
+
 # ---------- 1) 构造 3D Chamfer 和 logits 的代价矩阵 (vectorized) ----------
 def build_3d_cost_logits(pred_corners, gt_corners, pred_logits, cost_kwargs):
     """
@@ -845,12 +898,17 @@ def build_3d_cost_logits(pred_corners, gt_corners, pred_logits, cost_kwargs):
     min_pred = dist.min(dim=3)[0].mean(dim=2)  # [N_pred, N_gt]
     # For each gt point find nearest pred point
     min_gt = dist.min(dim=2)[0].mean(dim=2)    # [N_pred, N_gt]
+    # COST 1：chamfer distance
     chamfer = min_pred + min_gt                # [N_pred, N_gt]
 
-    # Classification (foreground encourages lower cost)
+    # COST 2 Classification (foreground encourages lower cost)
     logit_cost = -(pred_logits[:, 1].sigmoid()).unsqueeze(1).expand(N_pred, N_gt)
+    # COST 3: GIoU
+    giou = pairwise_giou_3d_from_corners(pred_corners, gt_corners)
+    
 
-    cost = cost_kwargs['chamfer_weight'] * chamfer + cost_kwargs['class_weight'] * logit_cost
+    cost = cost_kwargs['chamfer_weight'] * chamfer + cost_kwargs['class_weight'] * logit_cost - cost_kwargs['giou_weight'] * giou
+    
     return cost
 
 # ---------- 总接口 ----------
@@ -902,6 +960,7 @@ def compute_box_logit_loss_single(
     gt_2d=None,          # [N_gt, 4]
     w_box = 1.0, # Chamfer loss weight
     w_class = 1.0, # Classification loss weight
+    w_center = 1.0 # center L1 loss for box_corners
     ):
     """
     1. 用 3D Chamfer 和 logits 做匈牙利匹配
@@ -917,7 +976,7 @@ def compute_box_logit_loss_single(
     
 
     # 1) 构造代价矩阵（包含 Chamfer 距离和 logit 代价）
-    cost_kwargs = dict(chamfer_weight=1.0, class_weight=1.0) #10.0 1.0
+    cost_kwargs = dict(chamfer_weight=1.0, class_weight=1.0, giou_weight=1.0) #10.0 1.0
     cost_bbox = build_3d_cost_logits(pred_corners, gt_corners, pred_logits, cost_kwargs)
     
     # 2) 匈牙利匹配
@@ -928,6 +987,15 @@ def compute_box_logit_loss_single(
         matched_pred = pred_corners[pred_idx]
         matched_gt = gt_corners[gt_idx]
         chamfer_loss_val = chamfer_loss(matched_pred, matched_gt)
+        
+        # 计算中心点 (即 8 个角点的平均值)
+        center_pred = matched_pred.mean(dim=1)  # [N, 3]
+        center_gt = matched_gt.mean(dim=1)      # [N, 3]
+
+        # 计算 L1 损失（绝对误差）
+        l1_loss = F.l1_loss(center_pred, center_gt, reduction='mean')
+
+        # print("Center L1 Loss:", l1_loss.item())
         
         # 4) 将匹配上的预测框标记为前景(0)
         class_labels[pred_idx] = 1.0
@@ -954,9 +1022,9 @@ def compute_box_logit_loss_single(
         
     
     # 6) 总损失
-    loss = w_box * chamfer_loss_val + w_class * class_loss
+    loss = w_box * chamfer_loss_val + w_class * class_loss + w_center * l1_loss
     
-    return loss, w_box * chamfer_loss_val, w_class * class_loss
+    return loss, w_box * chamfer_loss_val, w_class * class_loss, w_center * l1_loss
 
 def compute_box_loss(predictions, batch):
     
@@ -993,6 +1061,7 @@ def compute_box_logit_loss(pred_corners, pred_logits, batch):
     total_loss = 0
     total_chamfer_loss = 0
     total_class_loss = 0
+    total_center_loss = 0
     N_seq = len(pred_corners)
     # calcudate loss for each sequence
     # TODO: accelerate this
@@ -1009,17 +1078,19 @@ def compute_box_logit_loss(pred_corners, pred_logits, batch):
 
         gt_box_corners = gt_box_corners_seq #gt_box_corners 
         
-        loss, chamfer_loss_val, class_loss = compute_box_logit_loss_single(pred_box_corners, pred_box_logits, gt_box_corners, w_box=1.0, w_class=1.0) #w_class=0.05
+        loss, chamfer_loss_val, class_loss, center_loss = compute_box_logit_loss_single(pred_box_corners, pred_box_logits, gt_box_corners, w_box=1.0, w_class=1.0, w_center=1.0) #w_class=0.05
         # loss = chamfer_loss(pred_box_corners, gt_box_corners) 
 
         total_loss += loss
         total_chamfer_loss += chamfer_loss_val
         total_class_loss += class_loss
+        total_center_loss += center_loss
         
     loss_dict = {
         f"loss_box": total_loss,
         f"loss_chamfer": total_chamfer_loss,
         f"loss_class": total_class_loss,
+        f"loss_center": total_center_loss,
     }
 
     return loss_dict

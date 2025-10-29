@@ -1,7 +1,9 @@
 
 
 
-CUDA_VISIBLE_DEVICES=1 torchrun --nproc_per_node=1 launch.py
+CUDA_VISIBLE_DEVICES=2 nohup torchrun --nproc_per_node=1 launch.py > ./logs/25-10-24-training-44358168-220-240-fusion-proj.log
+
+CUDA_VISIBLE_DEVICES=3 python demo_box.py
 
 cd training
 nohup torchrun --nproc_per_node=2 launch.py > ./logs/25-9-25-training-42444750-200-180-noimgaug.log
@@ -13,9 +15,17 @@ nohup torchrun --nproc_per_node=4 launch.py > ./logs/25-10-5-training-42444750-5
 
 nohup torchrun --nproc_per_node=4 launch.py > ./logs/25-10-6-training-42444750-520-mask-12gtbox-changeconfig.log
 
-nohup torchrun --nproc_per_node=4 launch.py > ./logs/25-10-6-training-42444750-520-mask-12gtbox-only1600-first.log 
+nohup torchrun --nproc_per_node=2 _per_node=4 launch.py > ./logs/25-10-6-training-42444750-520-mask-12gtbox-only1600-first.log 
+
+nohup torchrun --nproc_per_node=4 launch.py > ./logs/25-10-20-training-42444750-180-200-test.log 
+
+nohup torchrun --nproc_per_node=3 launch.py > ./logs/25-10-29-training-42444750-180-200-giou-matching.log
+
+
 
 torchrun --nproc_per_node=4 launch.py 
+
+CUDA_VISIBLE_DEVICES=2 torchrun --nproc_per_node=1 launch.py 
 
 
 nohup torchrun --nproc_per_node=4 launch.py > ./logs/25-10-18-training-42444750-580-520-new.log
@@ -45,6 +55,5 @@ start training using the new fusion module
 1.放宽了depth filtering gt boxes的要求
 
 正在训练：
-1.decoder全随机初始化，box pred_pose 1DOF->3DOF，'ZYX', 用camera head预测的gravity
-TODO:
 1.decoder全随机初始化，box pred_pose 1DOF->3DOF，'ZYX', *不用*camera head预测的gravity
+TODO:

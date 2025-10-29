@@ -148,12 +148,14 @@ class CA1MDataset(BaseDataset):
             seq_name = self.sequence_list[seq_index]
         # 指定seq
         seq_name = '42444750'
+        # seq_name = '44358168'
         # 如果没有提供特定ID，则随机选择图像
         if ids is None:
             # ids = np.random.choice(
             #     self.data_store[seq_name], img_per_seq, replace=self.allow_duplicate_img
             # )
             ids = np.array([180, 200])
+            # ids = np.array([220, 240])
             # ids = np.array([580, 520])
             # ids = np.array([520])
             
@@ -177,6 +179,11 @@ class CA1MDataset(BaseDataset):
         scene_data = self.load_scene_data(seq_name)
         # Load Box GT information
         filtered_bbox_corners = self.filter_gt_boxes_for_images(scene_data, image_idxs)
+        
+        # change boxes that are not parallel to Z-AXIS to be parallel
+        filtered_bbox_corners, tilted_mask, tilt_degs = self.upright_boxes(filtered_bbox_corners, tilt_deg_thresh=5.0)
+        
+        
 
         #TODO: test difficult boxes
         # cidx = [2, 4, 6, 13]
@@ -515,6 +522,95 @@ class CA1MDataset(BaseDataset):
             print(f"Warning: Error in filter_3d_corners: {str(e)}")
             # 返回所有corners作为后备
             return corners
+    
+    
+    def _normalize(self, v):
+        n = np.linalg.norm(v)
+        return v / n if n > 0 else v
+
+    def _rotation_align_a_to_b(self, a, b):
+        """
+        返回将向量 a 旋到向量 b 的 3x3 旋转矩阵（右手系）。
+        a,b 为长度为3的一维向量。
+        """
+        a = self._normalize(a)
+        b = self._normalize(b)
+        c = np.dot(a, b)            # cos(theta)
+        if c >= 1.0 - 1e-12:        # 已对齐
+            return np.eye(3)
+        if c <= -1.0 + 1e-12:       # 反向（180°），任选一条与 a 正交的轴
+            # 找到任意与 a 不平行的基向量
+            tmp = np.array([1.0, 0.0, 0.0])
+            if abs(np.dot(a, tmp)) > 0.9:
+                tmp = np.array([0.0, 1.0, 0.0])
+            axis = self._normalize(np.cross(a, tmp))
+            # 罗德里格斯公式，theta=pi
+            K = np.array([[0, -axis[2], axis[1]],
+                        [axis[2], 0, -axis[0]],
+                        [-axis[1], axis[0], 0]])
+            R = np.eye(3) + 2 * K @ K  # 因为 sin(pi)=0, (1-cos(pi))=2
+            return R
+
+        v = np.cross(a, b)          # 旋转轴方向（未归一化）
+        s = np.linalg.norm(v)       # sin(theta)
+        v = v / s                   # 归一化轴
+        K = np.array([[0, -v[2], v[1]],
+                    [v[2], 0, -v[0]],
+                    [-v[1], v[0], 0]])
+        # 罗德里格斯公式：R = I + K*sin + K^2*(1-cos)
+        R = np.eye(3) + K * s + (K @ K) * (1 - c)
+        return R
+
+    def upright_boxes(self, corners: np.ndarray, tilt_deg_thresh: float = 5.0):
+        """
+        输入:
+            corners: [N, 8, 3] 的 numpy 数组
+            tilt_deg_thresh: 判定“非垂直”的阈值（度）
+        返回:
+            upright_corners: [N, 8, 3]，将“倾斜”的 box 旋正后的角点；其余保持不变
+            tilted_mask: [N] 的布尔数组，True 表示该 box 原本非垂直，被处理过
+            tilt_degs: [N] 与世界 z 轴的夹角（度）
+        """
+        assert corners.ndim == 3 and corners.shape[1:] == (8, 3), "corners 形状需为 [N, 8, 3]"
+        N = corners.shape[0]
+        z_hat = np.array([0.0, 0.0, 1.0])
+
+        upright = np.empty_like(corners)
+        tilted_mask = np.zeros((N,), dtype=bool)
+        tilt_degs = np.zeros((N,), dtype=float)
+
+        for i in range(N):
+            pts = corners[i]                       # [8,3]
+            c = pts.mean(axis=0)                   # 质心
+            X = pts - c                            # 去中心化 [8,3]
+
+            # 用 SVD/PCA 求主轴（列为主方向）
+            # X = U S V^T，主方向为 V 的列（或 V^T 的行）
+            _, S, Vt = np.linalg.svd(X, full_matrices=False)
+            axes = Vt.T                             # [3,3], 每列一个主方向，按方差大小降序
+
+            # 选与世界 z 轴最接近的主轴，视为 box 的“局部 z 轴”
+            dots = np.abs(axes.T @ z_hat)          # 与 z 的投影绝对值，[3]
+            k = int(np.argmax(dots))
+            local_z = axes[:, k]                   # 与 z 最近的轴方向（单位向量）
+
+            # 计算倾斜角
+            cosang = np.clip(np.abs(np.dot(self._normalize(local_z), z_hat)), 0.0, 1.0)
+            ang = np.degrees(np.arccos(cosang))
+            tilt_degs[i] = float(ang)
+
+            if ang > tilt_deg_thresh:
+                # 旋转到 z 轴对齐（绕质心）
+                R = self._rotation_align_a_to_b(local_z, z_hat)
+                X_rot = (R @ X.T).T                # [8,3]
+                pts_upright = X_rot + c
+                upright[i] = pts_upright
+                tilted_mask[i] = True
+            else:
+                # 已足够垂直，直接保留
+                upright[i] = pts
+
+        return upright, tilted_mask, tilt_degs
     
     def depth_to_pointcloud(self, depth_maps, K, T_wc):
         N_imgs = depth_maps.shape[0]

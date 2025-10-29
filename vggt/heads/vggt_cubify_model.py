@@ -428,20 +428,7 @@ class PromptDecoder(nn.Module):
         
         N_batch = prompts[0].batch_size
         N_emb = src.shape[-1]
-        # REVISED BY LYQ
-        # reference = []
-        # for idx in range(prompts[0].batch_size):
-        #     # 创建内层列表用于收集符合条件的prompt.pred值
-        #     inner_list = []
-        #     for prompt in prompts: #[MetricPrompt,EncoderPrompt]
-        #         # 条件过滤：只处理box_attn_prior_mask不为空的prompt
-        #         #[Instances3D]
-        #         if prompt.box_attn_prior_mask.any():
-        #             print("prompt.pred",prompt.pred,len(prompt.pred))
-        #             inner_list.append(prompt.pred[0])
-            
-        #     # 使用Instances3D.cat处理内层列表并添加到结果中
-        #     reference.append(Instances3D.cat(inner_list))
+        
         
         #cat all prompts of a batch
         prompts = Prompt.cat(prompts)        
@@ -712,7 +699,7 @@ class AbsoluteBox3DPredictor(Predictor):
         self.center_2d_dim = 2
         self.z_dim = 1
         self.dims_dim = 3
-        self.pose_dim = 3 #TODO: ori:1
+        self.pose_dim = 1 #TODO: ori:1
         # 头部：MLP 从 embed_dim → embed_dim → out_dim=2+1+3+1，共 3 层（含输出层）
         self.mlp = MLP(
             embed_dim,
@@ -778,11 +765,11 @@ class AbsoluteBox3DPredictor(Predictor):
             # 把网络输出的单通道 box_pose 当作“yaw”，另外两个欧拉角分量强制为 0
             # 下行拼成 (yaw, 0, 0) 的形式；后续用 'YXZ' 顺序转矩阵：
             # 仅允许绕 Y 轴的旋转（注意：这依赖你的坐标系把“重力轴”定义为 Y）。
-            # TODO:
-            # box_pose = torch.cat((box_pose, torch.zeros_like(box_pose), torch.zeros_like(box_pose)), dim=-1)
-            # box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'YXZ').view(batch_size, -1, 3, 3) #TODO: ori
+            # TODO: ori
+            box_pose = torch.cat((box_pose, torch.zeros_like(box_pose), torch.zeros_like(box_pose)), dim=-1)
+            box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'YXZ').view(batch_size, -1, 3, 3) 
             
-            box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'ZYX').view(batch_size, -1, 3, 3) 
+            # box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'ZYX').view(batch_size, -1, 3, 3) 
 
             
         # 选择用于反白化的 info：优先用深度通道；否则回落到图像通道
@@ -1226,6 +1213,7 @@ class EncoderProposals(Prompter):
             output_xyz = torch.bmm(
                 torch.linalg.inv(K), torch.cat((output_.pred_z_scaled * output_.pred_proj_xy, output_.pred_z_scaled), dim=-1)[..., None])[..., 0]
             
+            # OPTION 1:
             # using the T_gravity from VGGT camera poses
             # RT=extrinsic_homo[index:index+1]
             # current_orientation = ImageOrientation(get_orientation(RT)[-1].item())   
@@ -1235,13 +1223,12 @@ class EncoderProposals(Prompter):
             # # output_xyz = (T_gravity @ output_xyz.unsqueeze(-1) ).squeeze()
             # output_.pred_pose = T_gravity @ output_.pred_pose
 
-            
-            
-
+            # OPTION 2:
             # TODO: ori
             # if info.has("T_gravity"):
                 # output_.pred_pose = info.T_gravity[-1:] @ output_.pred_pose
             
+            # OPTION 3:
             # using the T_gravity from camera head
             output_.pred_pose = gravity[index//N_img, index % N_img].unsqueeze(0) @ output_.pred_pose
             
@@ -1254,10 +1241,12 @@ class EncoderProposals(Prompter):
             output_.pred_pose = torch.matmul(R[None, :, :], output_.pred_pose)
             output_.pred_xyz = output_xyz_world  #output_xyz
 
+            
+            
             batch_output.append(output_)
                 
-                
             if (index+1) % N_img==0:
+                # batch_output = batch_output[1]
                 batch_output = Instances3D.cat(batch_output)
                 results.append(self.inference_single_image(batch_output, sensor["image"].data.image_sizes[index], topk=topk))
                 batch_output=[]
@@ -1380,7 +1369,31 @@ class Joiner(nn.Sequential):
 
         return out
     
-    
+
+class FusionProj(nn.Module):
+    def __init__(self, in_dim, hidden_dim=None, out_dim=None, dropout=0.1):
+        super().__init__()
+        out_dim = out_dim or in_dim
+        hidden_dim = hidden_dim or (in_dim // 2)
+        # 一个轻量 MLP (可替换为 1x1 conv、或 attention)
+        self.proj = nn.Sequential(
+            nn.Linear(in_dim, hidden_dim),
+            nn.GELU(),
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, out_dim),
+        )
+        # 可选：残差比例
+        self.gamma = nn.Parameter(torch.tensor(0.0))  # start as 0 -> identity behavior
+
+    def forward(self, a, b):
+        # a, b: [B, N, D] each, cat -> [B, N, 2D]
+        x = torch.cat([a, b], dim=-1)
+        out = self.proj(x)  # [B, N, D]
+        # 残差混合：开始时 y 被抑制（gamma=0），训练中逐步学会利用 y
+        # out = (1 - torch.sigmoid(self.gamma)) * b + torch.sigmoid(self.gamma) * y
+        return out
+
+
 '''
 added by lyq
 '''
@@ -1982,6 +1995,9 @@ class FeatureFusionModule_v3(nn.Module):
         
         # dropout
         self.dropout = nn.Dropout(0.1)
+        
+        # features mlp
+        self.fusion_proj = FusionProj(in_dim=2*d_clip, hidden_dim=d_clip, out_dim=d_clip)
 
     def forward(self, clip_features, spatial_encoder_features, mask_flatten):
         """
@@ -2019,7 +2035,10 @@ class FeatureFusionModule_v3(nn.Module):
         
         # 5. Residual Connection and Dropout 残差连接与Dropout。
         fused_features = self.out_norm(fused_features) # 对输出进行层归一化
-        fused_features = fused_features + clip_features  # 残差连接：将融合后的特征与原始的CLIP特征相加。这有助于梯度流动和保留原始信息。
+        
+        # fused_features = fused_features + clip_features  # 残差连接：将融合后的特征与原始的CLIP特征相加。这有助于梯度流动和保留原始信息。 
+        fused_features = self.fusion_proj(fused_features, clip_features)
+        
         # print(f'status_of_fused_features: max:{fused_features.max():.2f}, min:{fused_features.min():.2f}, mean:{fused_features.mean():.2f}, std:{fused_features.std():.2f}')
         # print(f'status_of_clip_features: max:{clip_features.max():.2f}, min:{clip_features.min():.2f}, mean:{clip_features.mean():.2f}, std:{clip_features.std():.2f}')
         fused_features = self.dropout(fused_features) # 最后应用Dropout
