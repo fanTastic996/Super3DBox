@@ -157,7 +157,6 @@ vis_results/
 
 *.png
 
-*.yaml
 training/config/
 
 training/logs/
