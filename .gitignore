@@ -156,3 +156,4 @@ vis_results/
 training/config/
 training/logs/
 vis.sh
+training/data/datasets/ca1m.py
