@@ -157,10 +157,7 @@ vis_results/
 
 *.png
 
-<<<<<<< HEAD
 *.yaml
-=======
 training/config/
->>>>>>> cb18bd2 (test)
 
 training/logs/
