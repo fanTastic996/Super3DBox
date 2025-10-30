@@ -160,3 +160,5 @@ vis_results/
 training/config/
 
 training/logs/
+
+vis.sh
