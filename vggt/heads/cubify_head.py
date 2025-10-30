@@ -562,7 +562,6 @@ class CubifyHead(nn.Module):
     ):        
         self.init_sensor()
         all_results=[]
-        all_layer_results=[]
         
         N_batch = vggt_images.shape[0]
         N_img = vggt_images.shape[1]
@@ -685,38 +684,35 @@ class CubifyHead(nn.Module):
         )
         
         # 6. 处理最后层输出
-        layer_number = len(intermediate_preds)
+        # layer_number = len(intermediate_preds)
         
-        for layer_id in range(layer_number):
+        prompt_outputs = intermediate_preds[-1] #[-1] old
+        prompt_start_idx = 0
+        results = None
         
-            prompt_outputs = intermediate_preds[layer_id] #[-1] old
-            prompt_start_idx = 0
-            results = None
+        # 7. 遍历所有提示器生成最终预测
+        for prompter_index, (prompt, prompter) in enumerate(zip(prompts, prompters)):
+            # 提取当前提示器对应的输出
+            prompt_outputs_ = [
+                pred[prompt_start_idx:prompt_start_idx+prompt.number_prompts] 
+                for pred in prompt_outputs
+            ]
             
-            # 7. 遍历所有提示器生成最终预测
-            for prompter_index, (prompt, prompter) in enumerate(zip(prompts, prompters)):
-                # 提取当前提示器对应的输出
-                prompt_outputs_ = [
-                    pred[prompt_start_idx:prompt_start_idx+prompt.number_prompts] 
-                    for pred in prompt_outputs
-                ]
+            # 仅处理需要输出的提示
+            if prompt.has_output:
+                # 调用提示器的推理方法（如框预测、分割等）
+                results = prompter.inference( # only encoderproposals prompter since metric queries have already been done in previous steps.
+                    prompt_outputs_, sensor, 
+                    self.topk_per_image,
+                    intrinsic, extrinsic, gravity
+                )
+                prompt_start_idx += prompt.number_prompts
                 
-                # 仅处理需要输出的提示
-                if prompt.has_output:
-                    # 调用提示器的推理方法（如框预测、分割等）
-                    results = prompter.inference( # only encoderproposals prompter since metric queries have already been done in previous steps.
-                        prompt_outputs_, sensor, 
-                        self.topk_per_image,
-                        intrinsic, extrinsic, gravity
-                    )
-                    prompt_start_idx += prompt.number_prompts
-                    
-                    all_results = results # List: len=N_batch
-                    all_layer_results.append(all_results)
-                    break  # 通常只有一个提示器产生输出
+                all_results = results # List: len=N_batch
+                break  # 通常只有一个提示器产生输出
                 
    
-        return all_layer_results
+        return all_results
 
 
 

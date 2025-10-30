@@ -80,9 +80,8 @@ class MultitaskLoss(torch.nn.Module):
               
             pred_corners = predictions['pred_corners']
             pred_logits = predictions['pred_logits']
-            layer_num = predictions["layer_num"]
             # box_loss_dict = compute_box_loss(box_predictions, batch)#, **self.box)   
-            box_loss_dict = compute_box_logit_loss(pred_corners, pred_logits, batch, layer_num)#, **self.box)   
+            box_loss_dict = compute_box_logit_loss(pred_corners, pred_logits, batch)#, **self.box)   
             box_loss = box_loss_dict["loss_box"] * self.box["weight"]   
             total_loss = total_loss + box_loss
             loss_dict.update(box_loss_dict)
@@ -1057,42 +1056,41 @@ def compute_box_loss(predictions, batch):
     return loss_dict
 
 
-def compute_box_logit_loss(pred_corners, pred_logits, batch, layer_num):
+def compute_box_logit_loss(pred_corners, pred_logits, batch):
     
     total_loss = 0
     total_chamfer_loss = 0
     total_class_loss = 0
     total_center_loss = 0
-    N_seq = len(pred_corners)//layer_num
+    N_seq = len(pred_corners)
     # calcudate loss for each sequence
     # TODO: accelerate this
-    for l in range(layer_num):
-        for i in range(N_seq):
-            pred_box_corners = pred_corners[l * N_seq + i]
-            pred_box_logits = pred_logits[l * N_seq + i]
-            N_imgs = len(pred_box_corners)
+    for i in range(N_seq):
+        pred_box_corners = pred_corners[i]
+        pred_box_logits = pred_logits[i]
+        N_imgs = len(pred_box_corners)
 
-            gt_box_corners_seq = batch['bbox_corners'][i] # [N_gt, 8 ,3]
-            gt_box_corners_seq_sum = gt_box_corners_seq.sum(dim=[1, 2]) #[500]
-            gt_box_mask = gt_box_corners_seq_sum != 0.0
-            gt_box_corners_seq = gt_box_corners_seq[gt_box_mask]  # [N_gt, 8, 3]
-
-
-            gt_box_corners = gt_box_corners_seq #gt_box_corners 
-            
-            loss, chamfer_loss_val, class_loss, center_loss = compute_box_logit_loss_single(pred_box_corners, pred_box_logits, gt_box_corners, w_box=1.0, w_class=1.0, w_center=1.0) #w_class=0.05
+        gt_box_corners_seq = batch['bbox_corners'][i] # [N_gt, 8 ,3]
+        gt_box_corners_seq_sum = gt_box_corners_seq.sum(dim=[1, 2]) #[500]
+        gt_box_mask = gt_box_corners_seq_sum != 0.0
+        gt_box_corners_seq = gt_box_corners_seq[gt_box_mask]  # [N_gt, 8, 3]
 
 
-            total_loss += loss
-            total_chamfer_loss += chamfer_loss_val
-            total_class_loss += class_loss
-            total_center_loss += center_loss
-    
-    total_loss = total_loss / (layer_num* N_seq)
-    total_chamfer_loss = total_chamfer_loss / (layer_num* N_seq)
-    total_class_loss = total_class_loss / (layer_num* N_seq)
-    total_center_loss = total_center_loss / (layer_num* N_seq)
+        gt_box_corners = gt_box_corners_seq #gt_box_corners 
         
+        loss, chamfer_loss_val, class_loss, center_loss = compute_box_logit_loss_single(pred_box_corners, pred_box_logits, gt_box_corners, w_box=1.0, w_class=1.0, w_center=1.0) #w_class=0.05
+        # loss = chamfer_loss(pred_box_corners, gt_box_corners) 
+
+        total_loss += loss
+        total_chamfer_loss += chamfer_loss_val
+        total_class_loss += class_loss
+        total_center_loss += center_loss
+    
+    total_loss = total_loss / N_seq
+    total_chamfer_loss = total_chamfer_loss / N_seq
+    total_class_loss = total_class_loss / N_seq
+    total_center_loss = total_center_loss / N_seq
+    
     loss_dict = {
         f"loss_box": total_loss,
         f"loss_chamfer": total_chamfer_loss,

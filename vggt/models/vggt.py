@@ -235,18 +235,18 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                 # predictions["box_result"] = box_result
                 # predictions["pred_corners"] = all_corners
                 # predictions["pred_logits"] = all_logits
-                layer_num = len(box_result)
-                predictions["pred_corners"] = [box_result[lid][batch_idx].pred_boxes_3d.corners for lid in range(len(box_result)) for batch_idx in range(len(box_result[lid]))]
-                predictions["pred_logits"] = [box_result[lid][batch_idx].pred_logits for lid in range(len(box_result)) for batch_idx in range(len(box_result[lid]))]
                 
-                predictions["pred_scores"] = [box_result[lid][batch_idx].scores for lid in range(len(box_result)) for batch_idx in range(len(box_result[lid]))]
-                predictions["pred_R"] = [box_result[lid][batch_idx].pred_boxes_3d.R for lid in range(len(box_result)) for batch_idx in range(len(box_result[lid]))]
-                predictions["pred_center"] = [box_result[lid][batch_idx].pred_boxes_3d.gravity_center for lid in range(len(box_result)) for batch_idx in range(len(box_result[lid]))]
-                predictions["pred_size"] = [box_result[lid][batch_idx].pred_boxes_3d.dims for lid in range(len(box_result)) for batch_idx in range(len(box_result[lid]))]
+                predictions["pred_corners"] = [box_result[batch_idx].pred_boxes_3d.corners for batch_idx in range(len(box_result))]
+                predictions["pred_logits"] = [box_result[batch_idx].pred_logits for batch_idx in range(len(box_result))]
+                
+                predictions["pred_scores"] = [box_result[batch_idx].scores for batch_idx in range(len(box_result))]
+                predictions["pred_R"] = [box_result[batch_idx].pred_boxes_3d.R for batch_idx in range(len(box_result))]
+                predictions["pred_center"] = [box_result[batch_idx].pred_boxes_3d.gravity_center for batch_idx in range(len(box_result))]
+                predictions["pred_size"] = [box_result[batch_idx].pred_boxes_3d.dims for batch_idx in range(len(box_result))]
                 
                 predictions["extrinsics"] = extrinsic
                 predictions["intrinsics"] = intrinsic
-                predictions["layer_num"] = layer_num
+                
                 
         if self.track_head is not None and query_points is not None:
             track_list, vis, conf = self.track_head(

@@ -23,7 +23,7 @@ nohup torchrun --nproc_per_node=3 launch.py > ./logs/25-10-29-training-42444750-
 
 
 
-torchrun --nproc_per_node=4 launch.py 
+torchrun --nproc_per_node=2 launch.py 
 
 CUDA_VISIBLE_DEVICES=2 torchrun --nproc_per_node=1 launch.py 
 
