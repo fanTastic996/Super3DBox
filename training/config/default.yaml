@@ -89,10 +89,10 @@ logging:
 checkpoint:
   save_dir: logs/${exp_name}/ckpts
   save_freq: 20 # 5
-  resume_checkpoint_path: null 
-  cubify_checkpoint_path: null 
-  # resume_checkpoint_path: /data/lyq/vggt_model/model.pt #/data/lyq/vggt_model/model.pt #/YOUR/PATH/TO/CKPT
-  # cubify_checkpoint_path: /data/lyq/vggt_model/cutr_rgb.pth
+  # resume_checkpoint_path: null 
+  # cubify_checkpoint_path: null 
+  resume_checkpoint_path: /data/lyq/vggt_model/model.pt #/data/lyq/vggt_model/model.pt #/YOUR/PATH/TO/CKPT
+  cubify_checkpoint_path: /data/lyq/vggt_model/cutr_rgb.pth
   strict: False
 
 

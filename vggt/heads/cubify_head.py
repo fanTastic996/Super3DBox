@@ -558,9 +558,11 @@ class CubifyHead(nn.Module):
         gravity=None,
         do_preprocess: bool = True,  # 是否执行预处理（保留接口）
         do_postprocess: bool = True,  # 是否执行后处理（保留接口）
+        training: bool = True,
     ):        
         self.init_sensor()
         all_results=[]
+        all_layer_results=[]
         
         N_batch = vggt_images.shape[0]
         N_img = vggt_images.shape[1]
@@ -683,40 +685,45 @@ class CubifyHead(nn.Module):
         )
         
         # 6. 处理最后层输出
-        prompt_outputs = intermediate_preds[-1] #[-1] old
-        prompt_start_idx = 0
-        results = None
+        layer_number = len(intermediate_preds)
         
-        # 7. 遍历所有提示器生成最终预测
-        for prompter_index, (prompt, prompter) in enumerate(zip(prompts, prompters)):
-            # 提取当前提示器对应的输出
-            prompt_outputs_ = [
-                pred[prompt_start_idx:prompt_start_idx+prompt.number_prompts] 
-                for pred in prompt_outputs
-            ]
+        for layer_id in range(layer_number):
+        
+            prompt_outputs = intermediate_preds[layer_id] #[-1] old
+            prompt_start_idx = 0
+            results = None
             
-            # 仅处理需要输出的提示
-            if prompt.has_output:
-                # 调用提示器的推理方法（如框预测、分割等）
-                results = prompter.inference( # only encoderproposals prompter since metric queries have already been done in previous steps.
-                    prompt_outputs_, sensor, 
-                    self.topk_per_image,
-                    intrinsic, extrinsic, gravity
-                )
-                prompt_start_idx += prompt.number_prompts
+            # 7. 遍历所有提示器生成最终预测
+            for prompter_index, (prompt, prompter) in enumerate(zip(prompts, prompters)):
+                # 提取当前提示器对应的输出
+                prompt_outputs_ = [
+                    pred[prompt_start_idx:prompt_start_idx+prompt.number_prompts] 
+                    for pred in prompt_outputs
+                ]
                 
-                all_results = results
-                break  # 通常只有一个提示器产生输出
+                # 仅处理需要输出的提示
+                if prompt.has_output:
+                    # 调用提示器的推理方法（如框预测、分割等）
+                    results = prompter.inference( # only encoderproposals prompter since metric queries have already been done in previous steps.
+                        prompt_outputs_, sensor, 
+                        self.topk_per_image,
+                        intrinsic, extrinsic, gravity
+                    )
+                    prompt_start_idx += prompt.number_prompts
+                    
+                    all_results = results # List: len=N_batch
+                    all_layer_results.append(all_results)
+                    break  # 通常只有一个提示器产生输出
                 
    
-        return all_results
+        return all_layer_results
 
 
 
 
-    def forward(self, batched_inputs, aggregated_tokens_list, patch_start_idx, intrinsic=None, extrinsic=None, gravity=None, do_postprocess=True):
+    def forward(self, batched_inputs, aggregated_tokens_list, patch_start_idx, intrinsic=None, extrinsic=None, gravity=None, do_postprocess=True, training=True):
         """训练/推理的统一入口（实际调用推理函数）"""
-        return self.inference(batched_inputs, aggregated_tokens_list, patch_start_idx, intrinsic=intrinsic, extrinsic=extrinsic, gravity=gravity)
+        return self.inference(batched_inputs, aggregated_tokens_list, patch_start_idx, intrinsic=intrinsic, extrinsic=extrinsic, gravity=gravity, training=training)
 
     def extract_image_vggt_embeds_3d(
         self,

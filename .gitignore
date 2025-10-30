@@ -160,3 +160,5 @@ vis_results/
 *.png
 
 training/config/*
+
+training/logs/*
