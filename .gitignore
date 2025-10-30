@@ -150,15 +150,9 @@ skyseg.onnx
 
 
 training/backup
-
 examples/
-
 vis_results/
-
 *.png
-
 training/config/
-
 training/logs/
-
 vis.sh
