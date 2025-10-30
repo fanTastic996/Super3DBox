@@ -148,9 +148,7 @@ skyseg.onnx
 .pixi
 *.egg-info
 
-training/logs/tensorboard/
-training/logs/exp001/
-training/logs/log.txt
+
 training/backup
 
 examples/
@@ -159,6 +157,10 @@ vis_results/
 
 *.png
 
+<<<<<<< HEAD
 *.yaml
+=======
+training/config/
+>>>>>>> cb18bd2 (test)
 
-training/logs/*
+training/logs/
