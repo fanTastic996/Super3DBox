@@ -154,7 +154,7 @@ examples/
 vis_results/
 *.png
 training/config/
-training/logs/
+training/logs
 vis.sh
 training/data/datasets/ca1m.py
 run.txt
