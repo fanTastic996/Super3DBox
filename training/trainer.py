@@ -274,8 +274,9 @@ class Trainer:
 
         for k in cubify_checkpoint.keys():
             # 跳过包含 vggt_model 或 fusion_model 或 vggt_merger 的键
-            if not (k.startswith("vggt_model") or k.startswith("fusion_model") or k.startswith("vggt_merger")): #or k.startswith('decoder') # or bool(re.match(r"^decoder\.predictors\.[^.]+\.3\.mlp\.layers\.2(\.|$)", k))) 
+            if not (k.startswith("vggt_model") or k.startswith("fusion_model") or k.startswith("vggt_merger") or k.startswith('decoder')): #or k.startswith('decoder') # or bool(re.match(r"^decoder\.predictors\.[^.]+\.3\.mlp\.layers\.2(\.|$)", k))) 
                 if k in model_dict:  # 确保当前模型存在该参数
+                    # print("loaded box head:", k)
                     filtered_dict[k] = cubify_checkpoint[k]
                 else:
                     print(f"Warning: Key {k} not found in current model")

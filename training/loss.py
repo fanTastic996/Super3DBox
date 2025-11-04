@@ -867,7 +867,7 @@ def pairwise_giou_3d_from_corners(pred_corners: torch.Tensor,
     c_maxs = torch.maximum(p_maxs[:, None, :], g_maxs[None, :, :])       # [N,M,3]
     vol_c = aabb_volume(c_mins, c_maxs).clamp(min=eps)                   # [N,M]
 
-    giou = iou - (vol_c - union) / vol_c                                 # [N,M]
+    giou = iou - (vol_c - union) / vol_c      # [N,M]
     return giou
 
 
@@ -976,7 +976,7 @@ def compute_box_logit_loss_single(
     
 
     # 1) 构造代价矩阵（包含 Chamfer 距离和 logit 代价）
-    cost_kwargs = dict(chamfer_weight=1.0, class_weight=1.0, giou_weight=1.0) #10.0 1.0
+    cost_kwargs = dict(chamfer_weight=1.0, class_weight=1.0, giou_weight=1.0) # 1.0 chamfer_weight=2.0, class_weight=0.3, giou_weight=1.0
     cost_bbox = build_3d_cost_logits(pred_corners, gt_corners, pred_logits, cost_kwargs)
     
     # 2) 匈牙利匹配
@@ -1078,7 +1078,7 @@ def compute_box_logit_loss(pred_corners, pred_logits, batch):
 
         gt_box_corners = gt_box_corners_seq #gt_box_corners 
         
-        loss, chamfer_loss_val, class_loss, center_loss = compute_box_logit_loss_single(pred_box_corners, pred_box_logits, gt_box_corners, w_box=1.0, w_class=1.0, w_center=1.0) #w_class=0.05
+        loss, chamfer_loss_val, class_loss, center_loss = compute_box_logit_loss_single(pred_box_corners, pred_box_logits, gt_box_corners, w_box=1.0, w_class=1.0, w_center=3.0) #w_class=0.05
         # loss = chamfer_loss(pred_box_corners, gt_box_corners) 
 
         total_loss += loss

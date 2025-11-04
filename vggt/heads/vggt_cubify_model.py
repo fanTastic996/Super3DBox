@@ -699,7 +699,7 @@ class AbsoluteBox3DPredictor(Predictor):
         self.center_2d_dim = 2
         self.z_dim = 1
         self.dims_dim = 3
-        self.pose_dim = 1 #TODO: ori:1
+        self.pose_dim = 3 #TODO: ori:1
         # 头部：MLP 从 embed_dim → embed_dim → out_dim=2+1+3+1，共 3 层（含输出层）
         self.mlp = MLP(
             embed_dim,
@@ -766,10 +766,10 @@ class AbsoluteBox3DPredictor(Predictor):
             # 下行拼成 (yaw, 0, 0) 的形式；后续用 'YXZ' 顺序转矩阵：
             # 仅允许绕 Y 轴的旋转（注意：这依赖你的坐标系把“重力轴”定义为 Y）。
             # TODO: ori
-            box_pose = torch.cat((box_pose, torch.zeros_like(box_pose), torch.zeros_like(box_pose)), dim=-1)
-            box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'YXZ').view(batch_size, -1, 3, 3) 
+            # box_pose = torch.cat((box_pose, torch.zeros_like(box_pose), torch.zeros_like(box_pose)), dim=-1)
+            # box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'YXZ').view(batch_size, -1, 3, 3) 
             
-            # box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'ZYX').view(batch_size, -1, 3, 3) 
+            box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'YXZ').view(batch_size, -1, 3, 3)  # ZYX
 
             
         # 选择用于反白化的 info：优先用深度通道；否则回落到图像通道
@@ -1230,17 +1230,19 @@ class EncoderProposals(Prompter):
             
             # OPTION 3:
             # using the T_gravity from camera head
-            output_.pred_pose = gravity[index//N_img, index % N_img].unsqueeze(0) @ output_.pred_pose
-            
+            # TODO:seems wrong, need to change pred_pose @ gravity.T
+            # output_.pred_pose = gravity[index//N_img, index % N_img].unsqueeze(0) @ output_.pred_pose
+            # output_.pred_pose = torch.matmul(output_.pred_pose, gravity[index//N_img, index % N_img].unsqueeze(0))
             
             
             # Transform to world space
             R = extrinsic_homo[index, :3, :3]
             t = extrinsic_homo[index, :3, 3]
             output_xyz_world = (output_xyz @ R.T) + t
+            # output_xyz_world = (R.unsqueeze(0) @ output_xyz ) + t
             output_.pred_pose = torch.matmul(R[None, :, :], output_.pred_pose)
             output_.pred_xyz = output_xyz_world  #output_xyz
-
+            # output_.pred_xyz = output_xyz  # debug
             
             
             batch_output.append(output_)
