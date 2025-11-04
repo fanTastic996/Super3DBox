@@ -217,7 +217,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                 # extract ex and intrinsics [Seq, N, 3, 4/3]
                 extrinsic, intrinsic = pose_encoding_to_extri_intri(predictions["pose_enc"], images.shape[-2:])
                 
-                gravity_init, _ = gravity_encoding_to_extri_intri(predictions["gravity_enc"], images.shape[-2:]) #[B,1,3,4]
+                gravity_init, _ = gravity_encoding_to_extri_intri(predictions["gravity_enc"], images.shape[-2:]) #[B,N,3,4] every single frame has a pred gravity
                 gravity = gravity_init[:,:,:3,:3] #[B,1,3,3]
                 
                 # print("input",images.shape) #([4(B), 3(N_img), 3, 476, 518])
