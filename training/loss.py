@@ -1063,6 +1063,7 @@ def compute_box_logit_loss(pred_corners, pred_logits, batch):
     total_class_loss = 0
     total_center_loss = 0
     N_seq = len(pred_corners)
+    seq_count = 0
     # calcudate loss for each sequence
     # TODO: accelerate this
     for i in range(N_seq):
@@ -1074,9 +1075,11 @@ def compute_box_logit_loss(pred_corners, pred_logits, batch):
         gt_box_corners_seq_sum = gt_box_corners_seq.sum(dim=[1, 2]) #[500]
         gt_box_mask = gt_box_corners_seq_sum != 0.0
         gt_box_corners_seq = gt_box_corners_seq[gt_box_mask]  # [N_gt, 8, 3]
-
-
+        
         gt_box_corners = gt_box_corners_seq #gt_box_corners 
+        
+        if len(gt_box_corners)==0:
+            continue
         
         loss, chamfer_loss_val, class_loss, center_loss = compute_box_logit_loss_single(pred_box_corners, pred_box_logits, gt_box_corners, w_box=1.0, w_class=1.0, w_center=3.0) #w_class=0.05
         # loss = chamfer_loss(pred_box_corners, gt_box_corners) 
@@ -1085,11 +1088,13 @@ def compute_box_logit_loss(pred_corners, pred_logits, batch):
         total_chamfer_loss += chamfer_loss_val
         total_class_loss += class_loss
         total_center_loss += center_loss
+        seq_count+=1
     
-    total_loss = total_loss / N_seq
-    total_chamfer_loss = total_chamfer_loss / N_seq
-    total_class_loss = total_class_loss / N_seq
-    total_center_loss = total_center_loss / N_seq
+    if seq_count>0:
+        total_loss = total_loss / seq_count
+        total_chamfer_loss = total_chamfer_loss / seq_count
+        total_class_loss = total_class_loss / seq_count
+        total_center_loss = total_center_loss / seq_count
     
     loss_dict = {
         f"loss_box": total_loss,
