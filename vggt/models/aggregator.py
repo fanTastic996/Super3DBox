@@ -123,8 +123,8 @@ class Aggregator(nn.Module):
         self.aa_block_num = self.depth // self.aa_block_size
 
         # Note: We have two camera tokens, one for the first frame and one for the rest
-        # The same applies for register tokens
         self.camera_token = nn.Parameter(torch.randn(1, 2, 1, embed_dim))
+        # The same applies for register tokens
         self.register_token = nn.Parameter(torch.randn(1, 2, num_register_tokens, embed_dim))
 
         # The patch tokens start after the camera and register tokens

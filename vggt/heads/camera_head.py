@@ -68,7 +68,7 @@ class CameraHead(nn.Module):
 
         # Adaptive layer normalization without affine parameters.
         self.adaln_norm = nn.LayerNorm(dim_in, elementwise_affine=False, eps=1e-6)
-        self.pose_branch = Mlp(in_features=dim_in, hidden_features=dim_in // 2, out_features=self.target_dim, drop=0)
+        self.pose_branch = Mlp(in_features=dim_in, hidden_features=dim_in // 2, out_features=self.target_dim, drop=0) #core
 
     def forward(self, aggregated_tokens_list: list, num_iterations: int = 4) -> list:
         """
@@ -85,7 +85,7 @@ class CameraHead(nn.Module):
         # Use tokens from the last block for camera prediction.
         tokens = aggregated_tokens_list[-1]
 
-        # Extract the camera tokens
+        # Extract the camera tokens ([2, 3, 1374, 2048]) [seq, img, tokens, features]
         pose_tokens = tokens[:, :, 0]
         pose_tokens = self.token_norm(pose_tokens)
 
@@ -124,7 +124,7 @@ class CameraHead(nn.Module):
             pose_tokens_modulated = pose_tokens_modulated + pose_tokens
 
             pose_tokens_modulated = self.trunk(pose_tokens_modulated)
-            # Compute the delta update for the pose encoding.
+            # Compute the delta update for the pose encoding. FINAL Prediction Head
             pred_pose_enc_delta = self.pose_branch(self.trunk_norm(pose_tokens_modulated))
 
             if pred_pose_enc is None:
