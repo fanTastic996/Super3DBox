@@ -283,74 +283,8 @@ class PreNormGlobalDecoderLayer(nn.Module):
     def with_pos_embed(tensor, pos):
         return tensor if pos is None else tensor + pos
 
-    def forward(
-        self,
-        tgt,
-        query_pos,
-        reference_2d,
-        src,
-        src_pos_embed,
-        src_spatial_shapes,
-        batch_img,
-        src_padding_mask=None,
-        self_attn_mask=None,
-        box_attn_prior_mask=None
-    ):
-        N_batch, N_img = batch_img
-        # self_attn_mask = self_attn_mask[:2].flatten()
-        Q = self_attn_mask.size(0)
-        # big_mask = torch.zeros(2*N, 2*N, dtype=torch.bool).to(self_attn_mask.device)  # 默认全 True=屏蔽
-        # big_mask[:N, :N] = self_attn_mask # 图1 的区域
-        # big_mask[N:, N:] = self_attn_mask.clone() # 图2 的区域
-        # self_attn_mask = big_mask
-        A_block = self_attn_mask.expand(N_img, N_img, Q, Q)
-        A_block = A_block.permute(0, 2, 1, 3).reshape(N_img*Q, N_img*Q)
-        A_mask = torch.block_diag(*([A_block] * N_batch))
-        off_diag = ~torch.block_diag(*([torch.ones_like(A_block)] * N_batch))
-        self_attn_mask = off_diag | A_mask
-        
-        
-        # self attention
-        # 1️⃣ 自注意力：query 之间交互 让所有 queries（对象 tokens）互相沟通，理解彼此的上下文关系（比如不同物体之间的相对位置/类别信息）
-        tgt2 = self.norm2(tgt)
-        Ba, Nq, Nc = tgt2.shape
-        tgt2_merged = tgt2.reshape(1, Ba * Nq, Nc)
-        q = k = self.with_pos_embed(tgt2_merged, query_pos.reshape(1, Ba * Nq, Nc))
-        # nn.MultiheadAttention 的原始输入是 [seq_len, batch, embed_dim]
-        tgt2_merged = self.self_attn(
-            q.transpose(0, 1),
-            k.transpose(0, 1),
-            tgt2_merged.transpose(0, 1),
-            attn_mask=self_attn_mask,
-        )[0].transpose(0, 1)
-        tgt2 = tgt2_merged.reshape(Ba, Nq, Nc)
-        tgt = tgt + self.dropout2(tgt2)
-
-        # 2️⃣ 全局跨注意力：与图像特征交互
-        # global cross attention
-        # # 让每个 query 从 encoder 的图像特征（memory）中读取与自己位置相关的特征；这里使用 GlobalCrossAttention，支持相对位置偏置 RPE（Relative Positional Encoding），并通过 reference_2d（每个 query 对应的 2D box）指导注意力范围
-        if self.xattn is not None:
-            tgt2 = self.norm1(tgt)
-            tgt2 = self.xattn(
-                self.with_pos_embed(tgt2, query_pos),
-                reference_2d,
-                self.with_pos_embed(src, src_pos_embed),
-                src,
-                src_spatial_shapes,
-                src_padding_mask,
-                box_attn_prior_mask=box_attn_prior_mask
-            )
-
-            tgt = tgt + self.dropout1(tgt2)
-
-        # ffn 3️⃣ FFN 前馈网络 对每个 token 做非线性变换，增强特征表达能力
-        tgt2 = self.norm3(tgt)
-        tgt2 = self.linear2(self.dropout3(self.activation(self.linear1(tgt2))))
-        tgt = tgt + self.dropout4(tgt2)
-
-        return tgt
     '''
-    original
+    changed by lyq to make queries interact with each other
     '''
     # def forward(
     #     self,
@@ -360,24 +294,38 @@ class PreNormGlobalDecoderLayer(nn.Module):
     #     src,
     #     src_pos_embed,
     #     src_spatial_shapes,
+    #     batch_img,
     #     src_padding_mask=None,
     #     self_attn_mask=None,
     #     box_attn_prior_mask=None
     # ):
-        
+    #     N_batch, N_img = batch_img
+    #     # self_attn_mask = self_attn_mask[:2].flatten()
+    #     Q = self_attn_mask.size(0)
+    #     # big_mask = torch.zeros(2*N, 2*N, dtype=torch.bool).to(self_attn_mask.device)  # 默认全 True=屏蔽
+    #     # big_mask[:N, :N] = self_attn_mask # 图1 的区域
+    #     # big_mask[N:, N:] = self_attn_mask.clone() # 图2 的区域
+    #     # self_attn_mask = big_mask
+    #     A_block = self_attn_mask.expand(N_img, N_img, Q, Q)
+    #     A_block = A_block.permute(0, 2, 1, 3).reshape(N_img*Q, N_img*Q)
+    #     A_mask = torch.block_diag(*([A_block] * N_batch))
+    #     off_diag = ~torch.block_diag(*([torch.ones_like(A_block)] * N_batch))
+    #     self_attn_mask = off_diag | A_mask
         
     #     # self attention
     #     # 1️⃣ 自注意力：query 之间交互 让所有 queries（对象 tokens）互相沟通，理解彼此的上下文关系（比如不同物体之间的相对位置/类别信息）
     #     tgt2 = self.norm2(tgt)
-
-    #     q = k = self.with_pos_embed(tgt2, query_pos)
+    #     Ba, Nq, Nc = tgt2.shape
+    #     tgt2_merged = tgt2.reshape(1, Ba * Nq, Nc)
+    #     q = k = self.with_pos_embed(tgt2_merged, query_pos.reshape(1, Ba * Nq, Nc))
     #     # nn.MultiheadAttention 的原始输入是 [seq_len, batch, embed_dim]
-    #     tgt2 = self.self_attn(
+    #     tgt2_merged = self.self_attn(
     #         q.transpose(0, 1),
     #         k.transpose(0, 1),
-    #         tgt2.transpose(0, 1),
+    #         tgt2_merged.transpose(0, 1),
     #         attn_mask=self_attn_mask,
     #     )[0].transpose(0, 1)
+    #     tgt2 = tgt2_merged.reshape(Ba, Nq, Nc)
     #     tgt = tgt + self.dropout2(tgt2)
 
     #     # 2️⃣ 全局跨注意力：与图像特征交互
@@ -403,6 +351,60 @@ class PreNormGlobalDecoderLayer(nn.Module):
     #     tgt = tgt + self.dropout4(tgt2)
 
     #     return tgt
+    '''
+    original
+    '''
+    def forward(
+        self,
+        tgt,
+        query_pos,
+        reference_2d,
+        src,
+        src_pos_embed,
+        src_spatial_shapes,
+        src_padding_mask=None,
+        self_attn_mask=None,
+        box_attn_prior_mask=None
+    ):
+        
+        
+        # self attention
+        # 1️⃣ 自注意力：query 之间交互 让所有 queries（对象 tokens）互相沟通，理解彼此的上下文关系（比如不同物体之间的相对位置/类别信息）
+        tgt2 = self.norm2(tgt)
+
+        q = k = self.with_pos_embed(tgt2, query_pos)
+        # nn.MultiheadAttention 的原始输入是 [seq_len, batch, embed_dim]
+        tgt2 = self.self_attn(
+            q.transpose(0, 1),
+            k.transpose(0, 1),
+            tgt2.transpose(0, 1),
+            attn_mask=self_attn_mask,
+        )[0].transpose(0, 1)
+        tgt = tgt + self.dropout2(tgt2)
+
+        # 2️⃣ 全局跨注意力：与图像特征交互
+        # global cross attention
+        # # 让每个 query 从 encoder 的图像特征（memory）中读取与自己位置相关的特征；这里使用 GlobalCrossAttention，支持相对位置偏置 RPE（Relative Positional Encoding），并通过 reference_2d（每个 query 对应的 2D box）指导注意力范围
+        if self.xattn is not None:
+            tgt2 = self.norm1(tgt)
+            tgt2 = self.xattn(
+                self.with_pos_embed(tgt2, query_pos),
+                reference_2d,
+                self.with_pos_embed(src, src_pos_embed),
+                src,
+                src_spatial_shapes,
+                src_padding_mask,
+                box_attn_prior_mask=box_attn_prior_mask
+            )
+
+            tgt = tgt + self.dropout1(tgt2)
+
+        # ffn 3️⃣ FFN 前馈网络 对每个 token 做非线性变换，增强特征表达能力
+        tgt2 = self.norm3(tgt)
+        tgt2 = self.linear2(self.dropout3(self.activation(self.linear1(tgt2))))
+        tgt = tgt + self.dropout4(tgt2)
+
+        return tgt
 
 # This should be super vague, and take in "prompts" as queries and simply run them through
 # the underlying transformer.
@@ -454,7 +456,7 @@ class PromptDecoder(nn.Module):
                 src,
                 src_pos_embed,
                 src_spatial_shapes,
-                (batch, img_num),
+                # (batch, img_num),
                 src_padding_mask,
                 prompts.self_attn_mask,
                 box_attn_prior_mask=prompts.box_attn_prior_mask
@@ -699,7 +701,7 @@ class AbsoluteBox3DPredictor(Predictor):
         self.center_2d_dim = 2
         self.z_dim = 1
         self.dims_dim = 3
-        self.pose_dim = 3 #TODO: ori:1
+        self.pose_dim = 1 #TODO: ori:1
         # 头部：MLP 从 embed_dim → embed_dim → out_dim=2+1+3+1，共 3 层（含输出层）
         self.mlp = MLP(
             embed_dim,
@@ -766,10 +768,10 @@ class AbsoluteBox3DPredictor(Predictor):
             # 下行拼成 (yaw, 0, 0) 的形式；后续用 'YXZ' 顺序转矩阵：
             # 仅允许绕 Y 轴的旋转（注意：这依赖你的坐标系把“重力轴”定义为 Y）。
             # TODO: ori
-            # box_pose = torch.cat((box_pose, torch.zeros_like(box_pose), torch.zeros_like(box_pose)), dim=-1)
-            # box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'YXZ').view(batch_size, -1, 3, 3) 
+            box_pose = torch.cat((box_pose, torch.zeros_like(box_pose), torch.zeros_like(box_pose)), dim=-1)
+            box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'YXZ').view(batch_size, -1, 3, 3) 
             
-            box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'YXZ').view(batch_size, -1, 3, 3)  # ZYX
+            # box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'YXZ').view(batch_size, -1, 3, 3)  # ZYX
 
             
         # 选择用于反白化的 info：优先用深度通道；否则回落到图像通道
@@ -1226,8 +1228,30 @@ class EncoderProposals(Prompter):
             # OPTION 2:
             # TODO: ori
             # if info.has("T_gravity"):
-                # output_.pred_pose = info.T_gravity[-1:] @ output_.pred_pose
+            #     output_.pred_pose = info.T_gravity[-1:] @ output_.pred_pose
             
+            # if index == 0:
+            #     T_gravity = torch.tensor([[[ 0.9947,  0.0910, -0.0473],
+            #                             [-0.1025,  0.8826, -0.4588],
+            #                             [ 0.0000,  0.4612,  0.8873]]]).to(output_.pred_pose.device)
+            #     output_.pred_pose = T_gravity @ output_.pred_pose
+            # if index == 1:
+            #     T_gravity = torch.tensor([[ 0.9967,  0.0788, -0.0206],
+            #                             [-0.0815,  0.9644, -0.2517],
+            #                             [ 0.0000,  0.2526,  0.9676]]).to(output_.pred_pose.device)
+            #     output_.pred_pose = T_gravity @ output_.pred_pose
+            
+            if index == 0:
+                T_gravity = torch.tensor([[[ 0.9998,  0.0205, -0.0043],
+                                        [-0.0210,  0.9788, -0.2039],
+                                        [ 0.0000,  0.2040,  0.9790]]]).to(output_.pred_pose.device)
+                output_.pred_pose = T_gravity @ output_.pred_pose
+            if index == 1:
+                T_gravity = torch.tensor([[ 0.9970,  0.0672, -0.0390],
+                                        [-0.0777,  0.8621, -0.5007],
+                                        [ 0.0000,  0.5022,  0.8647]]).to(output_.pred_pose.device)
+                output_.pred_pose = T_gravity @ output_.pred_pose
+                
             # OPTION 3:
             # using the T_gravity from camera head
             # TODO:seems wrong, need to change pred_pose @ gravity.T

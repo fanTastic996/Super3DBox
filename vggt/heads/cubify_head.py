@@ -433,8 +433,8 @@ class CubifyHead(nn.Module):
         pixel_mean,     # 图像归一化均值
         pixel_std,      # 图像归一化标准差
         pos_embedding,  # 位置编码模块
-        fusion_module,  # 特征融合模块
-        vggt_merger,  # VGGT特征合并器
+        # fusion_module,  # 特征融合模块
+        # vggt_merger,  # VGGT特征合并器
         # frame_merger, # 帧特征合并器
         sensor_name="wide", # 使用的传感器类型
         topk_per_image=100  # 每张图像保留的最大预测数
@@ -446,8 +446,8 @@ class CubifyHead(nn.Module):
         self.decoder = decoder
         self.pos_embedding = pos_embedding
         #added
-        self.fusion_module = fusion_module  # 特征融合模块
-        self.vggt_merger = vggt_merger  # VGGT特征合并器
+        # self.fusion_module = fusion_module  # 特征融合模块
+        # self.vggt_merger = vggt_merger  # VGGT特征合并器
         # self.frame_merger = frame_merger  # 帧特征合并器
         # 注册图像归一化参数（自动跟随模型设备移动）
         self.register_buffer("pixel_mean", torch.tensor(pixel_mean).view(-1, 1, 1), False)
@@ -641,16 +641,15 @@ class CubifyHead(nn.Module):
 
         # 特征融合
         #extract VGGT增强的3D视觉特征
-        # TODO: 这个地方需要提前project吗
-        vggt_features = self.extract_image_vggt_embeds_3d_direct(aggregated_tokens_list[-2],patch_start_idx,img_H,img_W)  # [batch_size, num_frames, C, H, W]
+        # vggt_features = self.extract_image_vggt_embeds_3d_direct(aggregated_tokens_list[-2],patch_start_idx,img_H,img_W)  # [batch_size, num_frames, C, H, W]
 
 
-        vggt_features = vggt_features.view(src_flatten.shape[0],-1,vggt_features.shape[-1])  
+        # vggt_features = vggt_features.view(src_flatten.shape[0],-1,vggt_features.shape[-1])  
         
-        multiframe_fused_features = self.fusion_module(src_flatten, vggt_features, mask_flatten)
+        # multiframe_fused_features = self.fusion_module(src_flatten, vggt_features, mask_flatten)
         
-        # fused_features = src_flatten # single frame
-        fused_features = multiframe_fused_features #.reshape(1, -1, 256)  #[1, N*single_img_token, 256]
+        fused_features = src_flatten # single frame
+        # fused_features = multiframe_fused_features #.reshape(1, -1, 256)  #[1, N*single_img_token, 256]
         
         fused_features = rearrange(fused_features, '(b n) c d -> b (n c) d', b = N_batch, n = N_img)
         mask_flatten = mask_flatten.reshape(N_batch, -1)

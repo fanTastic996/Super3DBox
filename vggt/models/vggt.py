@@ -134,17 +134,17 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
             #                                  num_heads=8,
             #                                  dropout=0.1,
             #                                  fusion_type='add'),
-            fusion_module=FeatureFusionModule_v3(d_clip=256,
-                                             d_spatial_encoder=2048,
-                                             d_attn=256,
-                                             num_heads=8),
+            # fusion_module=FeatureFusionModule_v3(d_clip=256,
+            #                                  d_spatial_encoder=2048,
+            #                                  d_attn=256,
+            #                                  num_heads=8),
             
-            vggt_merger=VGGTMerger(
-                        output_dim=2048, #config.hidden_size, #2048
-                        hidden_dim=4096, #getattr(config, "vggt_merger_hidden_dim", 4096), #4096
-                        context_dim=2048,
-                        spatial_merge_size=2 #config.vision_config.spatial_merge_size, # 2
-                    ),
+            # vggt_merger=VGGTMerger(
+            #             output_dim=2048, #config.hidden_size, #2048
+            #             hidden_dim=4096, #getattr(config, "vggt_merger_hidden_dim", 4096), #4096
+            #             context_dim=2048,
+            #             spatial_merge_size=2 #config.vision_config.spatial_merge_size, # 2
+            #         ),
             # frame_merger=AttentionFusionWithTorch(embed_dim=256, num_heads=8),
             # frame_merger=LightweightCrossViewFusion(feat_dim=256),
             pixel_mean=[123.675, 116.28, 103.53],
@@ -217,8 +217,8 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                 # extract ex and intrinsics [Seq, N, 3, 4/3]
                 extrinsic, intrinsic = pose_encoding_to_extri_intri(predictions["pose_enc"], images.shape[-2:])
                 
-                gravity_init, _ = gravity_encoding_to_extri_intri(predictions["gravity_enc"], images.shape[-2:]) #[B,N,3,4] every single frame has a pred gravity
-                gravity = gravity_init[:,:,:3,:3] #[B,1,3,3]
+                # gravity_init, _ = gravity_encoding_to_extri_intri(predictions["gravity_enc"], images.shape[-2:]) #[B,N,3,4] every single frame has a pred gravity
+                # gravity = gravity_init[:,:,:3,:3] #[B,1,3,3]
                 
                 # print("input",images.shape) #([4(B), 3(N_img), 3, 476, 518])
                 box_result = self.box_head(
@@ -228,7 +228,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                     patch_start_idx,
                     intrinsic=intrinsic,
                     extrinsic=extrinsic,
-                    gravity=gravity
+                    gravity=None,#gravity
                     # images=images,
                 )
             
