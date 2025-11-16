@@ -16,7 +16,7 @@ import bisect
 from .dataset_util import *
 from .track_util import *
 from .augmentation import get_image_augmentation
-
+from vggt.utils.rotation import mat_to_quat, quat_to_mat
 
 class ComposedDataset(Dataset, ABC):
     """
@@ -121,10 +121,11 @@ class ComposedDataset(Dataset, ABC):
         world_points = torch.from_numpy(np.stack(batch["world_points"]).astype(np.float32))
         # Box GT processing
         if 'bbox_corners' in batch.keys():
-            # bbox_corners = [torch.from_numpy(np.stack(batch["bbox_corners"]).astype(np.float32))]
             bbox_corners = torch.from_numpy(np.stack(batch["bbox_corners"]).astype(np.float32))
-            # bbox_corners = {"bbox_corners": bbox_corners} 
-        
+        if 'gravity' in batch.keys():
+            gravity = torch.from_numpy(np.stack(batch["gravity"]).astype(np.float32))
+            gravity = mat_to_quat(gravity) #[N_img,3,3]
+            
         point_masks = torch.from_numpy(np.stack(batch["point_masks"])) # Mask indicating valid depths / world points / cam points per frame
         ids = torch.from_numpy(batch["ids"])    # Frame indices sampled from the original sequence
 
@@ -155,6 +156,7 @@ class ComposedDataset(Dataset, ABC):
             "world_points": world_points,
             "bbox_corners": bbox_corners if 'bbox_corners' in batch.keys() else None,
             "point_masks": point_masks,
+            "gravity": gravity if 'gravity' in batch.keys() else None,
         }
 
 

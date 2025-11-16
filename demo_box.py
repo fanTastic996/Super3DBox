@@ -15,8 +15,8 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 # bfloat16 is supported on Ampere GPUs (Compute Capability 8.0+) 
 dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
 
-# model = VGGT(enable_camera=True, enable_gravity=True, enable_point=False, enable_depth=False, enable_track=False, enable_cubify=True)
-model = VGGT(enable_camera=True, enable_gravity=False, enable_point=False, enable_depth=False, enable_track=False, enable_cubify=True)
+model = VGGT(enable_camera=True, enable_gravity=True, enable_point=False, enable_depth=False, enable_track=False, enable_cubify=True)
+# model = VGGT(enable_camera=True, enable_gravity=False, enable_point=False, enable_depth=False, enable_track=False, enable_cubify=True)
 _URL = "/home/lanyuqing/myproject/vggt/training/logs/exp001/ckpts/checkpoint.pt"
 model_dict= torch.load(_URL)
 model.load_state_dict(model_dict["model"])
@@ -33,8 +33,8 @@ scene_id = '42444750'
 
 # image_names = [f"{data_root}/{scene_id}/rgb/580.png", f"{data_root}/{scene_id}/rgb/520.png"]
 # image_names = [f"{data_root}/{scene_id}/rgb/520.png"]
-image_names = [f"{data_root}/{scene_id}/rgb/50.png", f"{data_root}/{scene_id}/rgb/70.png"]
-# image_names = [f"{data_root}/{scene_id}/rgb/180.png", f"{data_root}/{scene_id}/rgb/200.png"]
+# image_names = [f"{data_root}/{scene_id}/rgb/50.png", f"{data_root}/{scene_id}/rgb/70.png"]
+image_names = [f"{data_root}/{scene_id}/rgb/180.png", f"{data_root}/{scene_id}/rgb/200.png"]
 # image_names = [f"{data_root}/{scene_id}/rgb/438.png", f"{data_root}/{scene_id}/rgb/458.png", f"{data_root}/{scene_id}/rgb/478.png"]
 # image_names = [f"{data_root}/{scene_id}/rgb/200.png"]  
 images = load_and_preprocess_images(image_names).to(device)

@@ -80,8 +80,9 @@ class MultitaskLoss(torch.nn.Module):
               
             pred_corners = predictions['pred_corners']
             pred_logits = predictions['pred_logits']
+            pred_all_quad = predictions['gravity_enc']
             # box_loss_dict = compute_box_loss(box_predictions, batch)#, **self.box)   
-            box_loss_dict = compute_box_logit_loss(pred_corners, pred_logits, batch)#, **self.box)   
+            box_loss_dict = compute_box_logit_loss(pred_corners, pred_logits, pred_all_quad, batch)#, **self.box)   
             box_loss = box_loss_dict["loss_box"] * self.box["weight"]   
             total_loss = total_loss + box_loss
             loss_dict.update(box_loss_dict)
@@ -295,6 +296,19 @@ def compute_depth_loss(predictions, batch, gamma=1.0, alpha=0.2, gradient_loss_f
     }
 
     return loss_dict
+
+
+
+def quaternion_geodesic_loss(q_pred, q_gt, eps=1e-7):
+    # normalize first
+    q_pred = q_pred / (q_pred.norm(dim=-1, keepdim=True) + eps)
+    q_gt   = q_gt   / (q_gt.norm(dim=-1, keepdim=True) + eps)
+
+    dot = torch.sum(q_pred * q_gt, dim=-1)
+    dot = torch.clamp(dot.abs(), -1.0 + eps, 1.0 - eps)
+
+    angle = 2 * torch.acos(dot)       # radians
+    return angle.mean()
 
 
 def regression_loss(pred, gt, mask, conf=None, gradient_loss_fn=None, gamma=1.0, alpha=0.2, valid_range=-1):
@@ -1056,12 +1070,13 @@ def compute_box_loss(predictions, batch):
     return loss_dict
 
 
-def compute_box_logit_loss(pred_corners, pred_logits, batch):
+def compute_box_logit_loss(pred_corners, pred_logits, pred_all_quad, batch):
     
     total_loss = 0
     total_chamfer_loss = 0
     total_class_loss = 0
     total_center_loss = 0
+    total_rot_loss = 0
     N_seq = len(pred_corners)
     seq_count = 0
     # calcudate loss for each sequence
@@ -1083,11 +1098,18 @@ def compute_box_logit_loss(pred_corners, pred_logits, batch):
         
         loss, chamfer_loss_val, class_loss, center_loss = compute_box_logit_loss_single(pred_box_corners, pred_box_logits, gt_box_corners, w_box=1.0, w_class=1.0, w_center=3.0) #w_class=0.05
         # loss = chamfer_loss(pred_box_corners, gt_box_corners) 
-
-        total_loss += loss
+        
+        pred_quad = pred_all_quad[i]
+        gt_quad = batch['gravity'][i]
+        rot_loss = quaternion_geodesic_loss(pred_quad, gt_quad) * 0.5 #默认权重w=1
+        
+        # total_loss += loss
         total_chamfer_loss += chamfer_loss_val
         total_class_loss += class_loss
         total_center_loss += center_loss
+        total_rot_loss += rot_loss
+        # total_loss += rot_loss
+        total_loss = rot_loss
         seq_count+=1
     
     if seq_count>0:
@@ -1095,12 +1117,14 @@ def compute_box_logit_loss(pred_corners, pred_logits, batch):
         total_chamfer_loss = total_chamfer_loss / seq_count
         total_class_loss = total_class_loss / seq_count
         total_center_loss = total_center_loss / seq_count
-    
+        total_rot_loss = total_rot_loss / seq_count
+        
     loss_dict = {
         f"loss_box": total_loss,
         f"loss_chamfer": total_chamfer_loss,
         f"loss_class": total_class_loss,
         f"loss_center": total_center_loss,
+        f"loss_rot": total_rot_loss,
     }
 
     return loss_dict

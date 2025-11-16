@@ -388,10 +388,10 @@ class PreNormGlobalDecoderLayer(nn.Module):
         if self.xattn is not None:
             tgt2 = self.norm1(tgt)
             tgt2 = self.xattn(
-                self.with_pos_embed(tgt2, query_pos),
+                self.with_pos_embed(tgt2, query_pos), #q
                 reference_2d,
-                self.with_pos_embed(src, src_pos_embed),
-                src,
+                self.with_pos_embed(src, src_pos_embed), #k
+                src, #v
                 src_spatial_shapes,
                 src_padding_mask,
                 box_attn_prior_mask=box_attn_prior_mask
@@ -1215,48 +1215,10 @@ class EncoderProposals(Prompter):
             output_xyz = torch.bmm(
                 torch.linalg.inv(K), torch.cat((output_.pred_z_scaled * output_.pred_proj_xy, output_.pred_z_scaled), dim=-1)[..., None])[..., 0]
             
-            # OPTION 1:
-            # using the T_gravity from VGGT camera poses
-            # RT=extrinsic_homo[index:index+1]
-            # current_orientation = ImageOrientation(get_orientation(RT)[-1].item())   
-            # target_orientation = ImageOrientation.UPRIGHT
-            # T_gravity = get_camera_to_gravity_transform(RT[-1], current_orientation, target=target_orientation)
-            # T_gravity = T_gravity.unsqueeze(0)
-            # # output_xyz = (T_gravity @ output_xyz.unsqueeze(-1) ).squeeze()
-            # output_.pred_pose = T_gravity @ output_.pred_pose
-
-            # OPTION 2:
-            # TODO: ori
-            # if info.has("T_gravity"):
-            #     output_.pred_pose = info.T_gravity[-1:] @ output_.pred_pose
-            
-            # if index == 0:
-            #     T_gravity = torch.tensor([[[ 0.9947,  0.0910, -0.0473],
-            #                             [-0.1025,  0.8826, -0.4588],
-            #                             [ 0.0000,  0.4612,  0.8873]]]).to(output_.pred_pose.device)
-            #     output_.pred_pose = T_gravity @ output_.pred_pose
-            # if index == 1:
-            #     T_gravity = torch.tensor([[ 0.9967,  0.0788, -0.0206],
-            #                             [-0.0815,  0.9644, -0.2517],
-            #                             [ 0.0000,  0.2526,  0.9676]]).to(output_.pred_pose.device)
-            #     output_.pred_pose = T_gravity @ output_.pred_pose
-            
-            if index == 0:
-                T_gravity = torch.tensor([[[ 0.9998,  0.0205, -0.0043],
-                                        [-0.0210,  0.9788, -0.2039],
-                                        [ 0.0000,  0.2040,  0.9790]]]).to(output_.pred_pose.device)
-                output_.pred_pose = T_gravity @ output_.pred_pose
-            if index == 1:
-                T_gravity = torch.tensor([[ 0.9970,  0.0672, -0.0390],
-                                        [-0.0777,  0.8621, -0.5007],
-                                        [ 0.0000,  0.5022,  0.8647]]).to(output_.pred_pose.device)
-                output_.pred_pose = T_gravity @ output_.pred_pose
                 
             # OPTION 3:
-            # using the T_gravity from camera head
-            # TODO:seems wrong, need to change pred_pose @ gravity.T
-            # output_.pred_pose = gravity[index//N_img, index % N_img].unsqueeze(0) @ output_.pred_pose
-            # output_.pred_pose = torch.matmul(output_.pred_pose, gravity[index//N_img, index % N_img].unsqueeze(0))
+            # using the T_gravity from gravity head
+            output_.pred_pose = gravity[index//N_img, index % N_img].unsqueeze(0) @ output_.pred_pose
             
             
             # Transform to world space

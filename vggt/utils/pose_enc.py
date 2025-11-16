@@ -125,7 +125,7 @@ def pose_encoding_to_extri_intri(
 
 
 def gravity_encoding_to_extri_intri(
-    pose_encoding, image_size_hw=None, pose_encoding_type="absT_quaR_FoV", build_intrinsics=True  # e.g., (256, 512)
+    pose_encoding, image_size_hw=None, pose_encoding_type="quaR"  # e.g., (256, 512)
 ):
     """Convert a pose encoding back to camera extrinsics and intrinsics.
 
@@ -162,31 +162,14 @@ def gravity_encoding_to_extri_intri(
               assumed to be at the center of the image (W/2, H/2).
     """
 
-    intrinsics = None
-
-    if pose_encoding_type == "absT_quaR_FoV":
+    if pose_encoding_type == "quaR":
         #added to avg the multi-view encodings
         # pose_encoding = torch.mean(pose_encoding, dim=1, keepdim=True)
-        
-        T = pose_encoding[..., :3]
-        quat = pose_encoding[..., 3:7]
-        fov_h = pose_encoding[..., 7]
-        fov_w = pose_encoding[..., 8]
-
+        quat = pose_encoding[..., :]
         R = quat_to_mat(quat)
-        extrinsics = torch.cat([R, T[..., None]], dim=-1)
 
-        if build_intrinsics:
-            H, W = image_size_hw
-            fy = (H / 2.0) / torch.tan(fov_h / 2.0)
-            fx = (W / 2.0) / torch.tan(fov_w / 2.0)
-            intrinsics = torch.zeros(pose_encoding.shape[:2] + (3, 3), device=pose_encoding.device)
-            intrinsics[..., 0, 0] = fx
-            intrinsics[..., 1, 1] = fy
-            intrinsics[..., 0, 2] = W / 2
-            intrinsics[..., 1, 2] = H / 2
-            intrinsics[..., 2, 2] = 1.0  # Set the homogeneous coordinate to 1
+        return R
+        
     else:
         raise NotImplementedError
 
-    return extrinsics, intrinsics

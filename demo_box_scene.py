@@ -8,7 +8,7 @@ import pickle
 import os
 from PIL import Image
 
-def get_inferece_list(seq_name,interval = 20,data_store = 710):
+def get_inferece_list(interval = 20, data_store = 710):
     import numpy as np
 
     # 固定随机种子，保证可复现
@@ -17,7 +17,8 @@ def get_inferece_list(seq_name,interval = 20,data_store = 710):
     # 计算起始索引最大值
     all_id_lists = []
     for _ in range(20):
-        img_per_seq = np.random.randint(2, 4)
+        # img_per_seq = np.random.randint(2, 4)
+        img_per_seq = 2
         max_start = data_store - (img_per_seq - 1) * interval
         start_idx = np.random.randint(0, max_start) if max_start > 0 else 0
         ids = np.array([start_idx + i * interval for i in range(img_per_seq)])
@@ -32,7 +33,7 @@ dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.
 
 
 model = VGGT(enable_camera=True, enable_gravity=True, enable_point=False, enable_depth=False, enable_track=False, enable_cubify=True)
-_URL = "/home/lanyuqing/myproject/VGGT/training/logs/exp001/ckpts/checkpoint.pt"
+_URL = "/data/lyq/vggt_model/logs/exp001/ckpts/checkpoint.pt"
 model_dict= torch.load(_URL)
 model.load_state_dict(model_dict["model"])
 
@@ -40,12 +41,12 @@ model.load_state_dict(model_dict["model"])
 model.eval()
 model.to(device)
 
-data_root = '/home/lanyuqing/dataset/training'
-scene_id = '45261413' #43828340:635 42444750:711 45261413:406
+data_root = '/data/lyq/ca1m/ca1m/train-CA-1M-slam'
+scene_id = '42444750' #43828340:635 42444750:711 45261413:406
 
 
 
-all_id_lists = get_inferece_list(scene_id, interval=10, data_store=406)
+all_id_lists = get_inferece_list(interval=10, data_store=711)
 
 
 for idx in range(len(all_id_lists)):

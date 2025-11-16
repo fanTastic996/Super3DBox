@@ -9,7 +9,7 @@ import torch.nn as nn
 from huggingface_hub import PyTorchModelHubMixin  # used for model hub
 
 from vggt.models.aggregator import Aggregator
-from vggt.heads.camera_head import CameraHead
+from vggt.heads.camera_head import CameraHead, GravityHead
 from vggt.heads.dpt_head import DPTHead
 from vggt.heads.track_head import TrackHead
 from vggt.heads.cubify_head import CubifyHead
@@ -25,7 +25,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
         self.aggregator = Aggregator(img_size=img_size, patch_size=patch_size, embed_dim=embed_dim)
 
         self.camera_head = CameraHead(dim_in=2 * embed_dim) if enable_camera else None
-        self.gravity_head = CameraHead(dim_in=2 * embed_dim) if enable_gravity else None
+        self.gravity_head = GravityHead(dim_in=2 * embed_dim) if enable_gravity else None
         self.point_head = DPTHead(dim_in=2 * embed_dim, output_dim=4, activation="inv_log", conf_activation="expp1") if enable_point else None
         self.depth_head = DPTHead(dim_in=2 * embed_dim, output_dim=2, activation="exp", conf_activation="expp1") if enable_depth else None
         self.track_head = TrackHead(dim_in=2 * embed_dim, patch_size=patch_size) if enable_track else None
@@ -217,8 +217,8 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                 # extract ex and intrinsics [Seq, N, 3, 4/3]
                 extrinsic, intrinsic = pose_encoding_to_extri_intri(predictions["pose_enc"], images.shape[-2:])
                 
-                # gravity_init, _ = gravity_encoding_to_extri_intri(predictions["gravity_enc"], images.shape[-2:]) #[B,N,3,4] every single frame has a pred gravity
-                # gravity = gravity_init[:,:,:3,:3] #[B,1,3,3]
+                gravity_init = gravity_encoding_to_extri_intri(predictions["gravity_enc"], images.shape[-2:]) #[B,N,3,4] every single frame has a pred gravity
+                gravity = gravity_init[:,:,:3,:3] #[B,1,3,3]
                 
                 # print("input",images.shape) #([4(B), 3(N_img), 3, 476, 518])
                 box_result = self.box_head(
@@ -228,7 +228,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                     patch_start_idx,
                     intrinsic=intrinsic,
                     extrinsic=extrinsic,
-                    gravity=None,#gravity
+                    gravity=gravity
                     # images=images,
                 )
             
