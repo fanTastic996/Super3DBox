@@ -286,74 +286,6 @@ class PreNormGlobalDecoderLayer(nn.Module):
     '''
     changed by lyq to make queries interact with each other
     '''
-    # def forward(
-    #     self,
-    #     tgt,
-    #     query_pos,
-    #     reference_2d,
-    #     src,
-    #     src_pos_embed,
-    #     src_spatial_shapes,
-    #     batch_img,
-    #     src_padding_mask=None,
-    #     self_attn_mask=None,
-    #     box_attn_prior_mask=None
-    # ):
-    #     N_batch, N_img = batch_img
-    #     # self_attn_mask = self_attn_mask[:2].flatten()
-    #     Q = self_attn_mask.size(0)
-    #     # big_mask = torch.zeros(2*N, 2*N, dtype=torch.bool).to(self_attn_mask.device)  # 默认全 True=屏蔽
-    #     # big_mask[:N, :N] = self_attn_mask # 图1 的区域
-    #     # big_mask[N:, N:] = self_attn_mask.clone() # 图2 的区域
-    #     # self_attn_mask = big_mask
-    #     A_block = self_attn_mask.expand(N_img, N_img, Q, Q)
-    #     A_block = A_block.permute(0, 2, 1, 3).reshape(N_img*Q, N_img*Q)
-    #     A_mask = torch.block_diag(*([A_block] * N_batch))
-    #     off_diag = ~torch.block_diag(*([torch.ones_like(A_block)] * N_batch))
-    #     self_attn_mask = off_diag | A_mask
-        
-    #     # self attention
-    #     # 1️⃣ 自注意力：query 之间交互 让所有 queries（对象 tokens）互相沟通，理解彼此的上下文关系（比如不同物体之间的相对位置/类别信息）
-    #     tgt2 = self.norm2(tgt)
-    #     Ba, Nq, Nc = tgt2.shape
-    #     tgt2_merged = tgt2.reshape(1, Ba * Nq, Nc)
-    #     q = k = self.with_pos_embed(tgt2_merged, query_pos.reshape(1, Ba * Nq, Nc))
-    #     # nn.MultiheadAttention 的原始输入是 [seq_len, batch, embed_dim]
-    #     tgt2_merged = self.self_attn(
-    #         q.transpose(0, 1),
-    #         k.transpose(0, 1),
-    #         tgt2_merged.transpose(0, 1),
-    #         attn_mask=self_attn_mask,
-    #     )[0].transpose(0, 1)
-    #     tgt2 = tgt2_merged.reshape(Ba, Nq, Nc)
-    #     tgt = tgt + self.dropout2(tgt2)
-
-    #     # 2️⃣ 全局跨注意力：与图像特征交互
-    #     # global cross attention
-    #     # # 让每个 query 从 encoder 的图像特征（memory）中读取与自己位置相关的特征；这里使用 GlobalCrossAttention，支持相对位置偏置 RPE（Relative Positional Encoding），并通过 reference_2d（每个 query 对应的 2D box）指导注意力范围
-    #     if self.xattn is not None:
-    #         tgt2 = self.norm1(tgt)
-    #         tgt2 = self.xattn(
-    #             self.with_pos_embed(tgt2, query_pos),
-    #             reference_2d,
-    #             self.with_pos_embed(src, src_pos_embed),
-    #             src,
-    #             src_spatial_shapes,
-    #             src_padding_mask,
-    #             box_attn_prior_mask=box_attn_prior_mask
-    #         )
-
-    #         tgt = tgt + self.dropout1(tgt2)
-
-    #     # ffn 3️⃣ FFN 前馈网络 对每个 token 做非线性变换，增强特征表达能力
-    #     tgt2 = self.norm3(tgt)
-    #     tgt2 = self.linear2(self.dropout3(self.activation(self.linear1(tgt2))))
-    #     tgt = tgt + self.dropout4(tgt2)
-
-    #     return tgt
-    '''
-    original
-    '''
     def forward(
         self,
         tgt,
@@ -362,24 +294,38 @@ class PreNormGlobalDecoderLayer(nn.Module):
         src,
         src_pos_embed,
         src_spatial_shapes,
+        batch_img,
         src_padding_mask=None,
         self_attn_mask=None,
         box_attn_prior_mask=None
     ):
-        
+        N_batch, N_img = batch_img
+        # self_attn_mask = self_attn_mask[:2].flatten()
+        Q = self_attn_mask.size(0)
+        # big_mask = torch.zeros(2*N, 2*N, dtype=torch.bool).to(self_attn_mask.device)  # 默认全 True=屏蔽
+        # big_mask[:N, :N] = self_attn_mask # 图1 的区域
+        # big_mask[N:, N:] = self_attn_mask.clone() # 图2 的区域
+        # self_attn_mask = big_mask
+        A_block = self_attn_mask.expand(N_img, N_img, Q, Q)
+        A_block = A_block.permute(0, 2, 1, 3).reshape(N_img*Q, N_img*Q)
+        A_mask = torch.block_diag(*([A_block] * N_batch))
+        off_diag = ~torch.block_diag(*([torch.ones_like(A_block)] * N_batch))
+        self_attn_mask = off_diag | A_mask
         
         # self attention
         # 1️⃣ 自注意力：query 之间交互 让所有 queries（对象 tokens）互相沟通，理解彼此的上下文关系（比如不同物体之间的相对位置/类别信息）
         tgt2 = self.norm2(tgt)
-
-        q = k = self.with_pos_embed(tgt2, query_pos)
+        Ba, Nq, Nc = tgt2.shape
+        tgt2_merged = tgt2.reshape(1, Ba * Nq, Nc)
+        q = k = self.with_pos_embed(tgt2_merged, query_pos.reshape(1, Ba * Nq, Nc))
         # nn.MultiheadAttention 的原始输入是 [seq_len, batch, embed_dim]
-        tgt2 = self.self_attn(
+        tgt2_merged = self.self_attn(
             q.transpose(0, 1),
             k.transpose(0, 1),
-            tgt2.transpose(0, 1),
+            tgt2_merged.transpose(0, 1),
             attn_mask=self_attn_mask,
         )[0].transpose(0, 1)
+        tgt2 = tgt2_merged.reshape(Ba, Nq, Nc)
         tgt = tgt + self.dropout2(tgt2)
 
         # 2️⃣ 全局跨注意力：与图像特征交互
@@ -388,10 +334,10 @@ class PreNormGlobalDecoderLayer(nn.Module):
         if self.xattn is not None:
             tgt2 = self.norm1(tgt)
             tgt2 = self.xattn(
-                self.with_pos_embed(tgt2, query_pos), #q
+                self.with_pos_embed(tgt2, query_pos),
                 reference_2d,
-                self.with_pos_embed(src, src_pos_embed), #k
-                src, #v
+                self.with_pos_embed(src, src_pos_embed),
+                src,
                 src_spatial_shapes,
                 src_padding_mask,
                 box_attn_prior_mask=box_attn_prior_mask
@@ -405,6 +351,60 @@ class PreNormGlobalDecoderLayer(nn.Module):
         tgt = tgt + self.dropout4(tgt2)
 
         return tgt
+    # '''
+    # original
+    # '''
+    # def forward(
+    #     self,
+    #     tgt,
+    #     query_pos,
+    #     reference_2d,
+    #     src,
+    #     src_pos_embed,
+    #     src_spatial_shapes,
+    #     src_padding_mask=None,
+    #     self_attn_mask=None,
+    #     box_attn_prior_mask=None
+    # ):
+        
+        
+    #     # self attention
+    #     # 1️⃣ 自注意力：query 之间交互 让所有 queries（对象 tokens）互相沟通，理解彼此的上下文关系（比如不同物体之间的相对位置/类别信息）
+    #     tgt2 = self.norm2(tgt)
+
+    #     q = k = self.with_pos_embed(tgt2, query_pos)
+    #     # nn.MultiheadAttention 的原始输入是 [seq_len, batch, embed_dim]
+    #     tgt2 = self.self_attn(
+    #         q.transpose(0, 1),
+    #         k.transpose(0, 1),
+    #         tgt2.transpose(0, 1),
+    #         attn_mask=self_attn_mask,
+    #     )[0].transpose(0, 1)
+    #     tgt = tgt + self.dropout2(tgt2)
+
+    #     # 2️⃣ 全局跨注意力：与图像特征交互
+    #     # global cross attention
+    #     # # 让每个 query 从 encoder 的图像特征（memory）中读取与自己位置相关的特征；这里使用 GlobalCrossAttention，支持相对位置偏置 RPE（Relative Positional Encoding），并通过 reference_2d（每个 query 对应的 2D box）指导注意力范围
+    #     if self.xattn is not None:
+    #         tgt2 = self.norm1(tgt)
+    #         tgt2 = self.xattn(
+    #             self.with_pos_embed(tgt2, query_pos), #q
+    #             reference_2d,
+    #             self.with_pos_embed(src, src_pos_embed), #k
+    #             src, #v
+    #             src_spatial_shapes,
+    #             src_padding_mask,
+    #             box_attn_prior_mask=box_attn_prior_mask
+    #         )
+
+    #         tgt = tgt + self.dropout1(tgt2)
+
+    #     # ffn 3️⃣ FFN 前馈网络 对每个 token 做非线性变换，增强特征表达能力
+    #     tgt2 = self.norm3(tgt)
+    #     tgt2 = self.linear2(self.dropout3(self.activation(self.linear1(tgt2))))
+    #     tgt = tgt + self.dropout4(tgt2)
+
+    #     return tgt
 
 # This should be super vague, and take in "prompts" as queries and simply run them through
 # the underlying transformer.
@@ -445,7 +445,7 @@ class PromptDecoder(nn.Module):
 
         image_size = sensor["image"].data.image_sizes[0]
 
-        for lid, layer in enumerate(self.layers):
+        for lid, layer in enumerate(self.layers): #6
             # Currently, the only thing that influences the RPE is the current 2D box prediction.
             reference_2d = torch.stack([ref_.pred_boxes for ref_ in reference]).detach()
             output = layer(
@@ -456,7 +456,7 @@ class PromptDecoder(nn.Module):
                 src,
                 src_pos_embed,
                 src_spatial_shapes,
-                # (batch, img_num),
+                (batch, img_num), #TODO: only for query in a batch version
                 src_padding_mask,
                 prompts.self_attn_mask,
                 box_attn_prior_mask=prompts.box_attn_prior_mask
@@ -476,7 +476,8 @@ class PromptDecoder(nn.Module):
                     pred_instances_.proposal_z_unscaled = reference_.pred_z_unscaled
                     pred_instances_.proposal_dims = reference_.pred_dims
                     pred_instances_.proposal_pose = reference_.pred_pose
-
+            
+            #6层，每一层都有3个predictor head
             for predictor in self.predictors[lid]:
                 # Hacky, but let a predictor alter the output.
                 output_after_norm = predictor(output_after_norm, pred_instances, sensor)
@@ -1234,8 +1235,8 @@ class EncoderProposals(Prompter):
             batch_output.append(output_)
                 
             if (index+1) % N_img==0:
-                # batch_output = batch_output[1]
-                batch_output = Instances3D.cat(batch_output)
+                batch_output = batch_output[1]
+                # batch_output = Instances3D.cat(batch_output)
                 results.append(self.inference_single_image(batch_output, sensor["image"].data.image_sizes[index], topk=topk))
                 batch_output=[]
 

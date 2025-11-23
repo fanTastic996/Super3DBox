@@ -1103,13 +1103,13 @@ def compute_box_logit_loss(pred_corners, pred_logits, pred_all_quad, batch):
         gt_quad = batch['gravity'][i]
         rot_loss = quaternion_geodesic_loss(pred_quad, gt_quad) * 0.5 #默认权重w=1
         
-        # total_loss += loss
+        total_loss += loss
         total_chamfer_loss += chamfer_loss_val
         total_class_loss += class_loss
         total_center_loss += center_loss
         total_rot_loss += rot_loss
-        # total_loss += rot_loss
-        total_loss = rot_loss
+        total_loss += rot_loss
+        # total_loss = rot_loss
         seq_count+=1
     
     if seq_count>0:

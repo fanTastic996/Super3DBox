@@ -162,7 +162,10 @@ class Trainer:
             self._load_resuming_checkpoint_mine(self.checkpoint_conf.resume_checkpoint_path, self.checkpoint_conf.cubify_checkpoint_path)
         
         else:   
-            ckpt_path = get_resume_checkpoint(self.checkpoint_conf.save_dir)
+            if self.checkpoint_conf.pretrained_model is not None:
+                ckpt_path = self.checkpoint_conf.pretrained_model
+            else:
+                ckpt_path = get_resume_checkpoint(self.checkpoint_conf.save_dir)
             if ckpt_path is not None:
                 self._load_resuming_checkpoint(ckpt_path)
 
