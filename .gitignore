@@ -158,3 +158,4 @@ training/logs
 vis.sh
 training/data/datasets/ca1m.py
 run.txt
+nohup.out
