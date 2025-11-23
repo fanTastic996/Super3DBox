@@ -1235,8 +1235,8 @@ class EncoderProposals(Prompter):
             batch_output.append(output_)
                 
             if (index+1) % N_img==0:
-                batch_output = batch_output[1]
-                # batch_output = Instances3D.cat(batch_output)
+                # batch_output = batch_output[1]
+                batch_output = Instances3D.cat(batch_output)
                 results.append(self.inference_single_image(batch_output, sensor["image"].data.image_sizes[index], topk=topk))
                 batch_output=[]
 
