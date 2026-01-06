@@ -1138,7 +1138,7 @@ class EncoderProposals(Prompter):
         instances = []
         for encoder_proposal in encoder_proposals:
             # index 0 is foreground-ness.
-            topk_proposals_ = torch.topk(encoder_proposal.pred_logits[..., 0], min(top_k, len(encoder_proposal)), dim=0)[1]
+            topk_proposals_ = torch.topk(encoder_proposal.pred_logits[..., 0], min(top_k, len(encoder_proposal)), dim=0)[1] # chenged to 0 26-1-6-0039
             instances_ = encoder_proposal.clone()[topk_proposals_]
 
             instances.append(instances_)

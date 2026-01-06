@@ -19,7 +19,10 @@ except AttributeError:
     bicubic = PIL.Image.BICUBIC
 
 from vggt.utils.geometry import closed_form_inverse_se3
-
+import json
+import torch
+from collections import OrderedDict
+from typing import Any, Dict, List, Tuple, Union
 
 
 #####################################################################################################################
@@ -677,10 +680,16 @@ def read_depth(path: str, scale_adjustment=1.0) -> np.ndarray:
     elif path.lower().endswith(".png"):
         # d = load_16big_png_depth(path)
         d = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        if d is None:
+            print(f"Error: Failed to read depth image at {path}")
+            raise ValueError(f"Failed to read depth image: {path}")
     else:
         raise ValueError(f'unsupported depth file name "{path}"')
-
-    d = d * scale_adjustment
+    try:
+        d = d * scale_adjustment
+    except Exception as e:
+        print(f"Error: {e}, path: {path}")
+        return None
     
     
     # added by lyq
@@ -720,3 +729,372 @@ def load_16big_png_depth(depth_png: str) -> np.ndarray:
             .reshape((depth_pil.size[1], depth_pil.size[0]))
         )
     return depth
+
+
+
+
+# -----------------------------
+# pose helpers
+# -----------------------------
+def _as_np_pose_4x4(pose: Any) -> np.ndarray:
+    """Accept torch/np/list; (4,4) or (3,4) -> (4,4) np.float64"""
+    if hasattr(pose, "detach"):  # torch
+        T = pose.detach().cpu().numpy().astype(np.float64)
+    else:
+        T = np.asarray(pose, dtype=np.float64)
+
+    if T.shape == (3, 4):
+        T = np.vstack([T, np.array([0, 0, 0, 1], dtype=np.float64)])
+    assert T.shape == (4, 4), f"pose must be (4,4) or (3,4), got {T.shape}"
+    return T
+
+
+def _invert_pose_4x4(T: np.ndarray) -> np.ndarray:
+    """Invert a rigid 4x4 pose."""
+    R = T[:3, :3]
+    t = T[:3, 3]
+    R_inv = R.T
+    t_inv = -R_inv @ t
+    out = np.eye(4, dtype=np.float64)
+    out[:3, :3] = R_inv
+    out[:3, 3] = t_inv
+    return out
+
+
+def _transform_points_c2w(points_cam: np.ndarray, c2w: np.ndarray) -> np.ndarray:
+    """points_cam: (N,3), c2w: (4,4) -> points_world: (N,3)"""
+    pts = np.asarray(points_cam, dtype=np.float64).reshape(-1, 3)
+    N = pts.shape[0]
+    homo = np.hstack([pts, np.ones((N, 1), dtype=np.float64)])  # (N,4)
+    out = (c2w @ homo.T).T
+    return out[:, :3]
+
+
+# -----------------------------
+# 2D convex hull (monotonic chain)
+# -----------------------------
+def _convex_hull_2d(points_xy: np.ndarray) -> np.ndarray:
+    """points_xy: (N,2) -> hull (H,2) in CCW order"""
+    pts = np.asarray(points_xy, dtype=np.float64)
+    pts = np.unique(pts, axis=0)
+    if pts.shape[0] <= 2:
+        return pts
+
+    # sort by x then y
+    pts = pts[np.lexsort((pts[:, 1], pts[:, 0]))]
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower = []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+
+    upper = []
+    for p in pts[::-1]:
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+
+    return np.array(lower[:-1] + upper[:-1], dtype=np.float64)
+
+
+# -----------------------------
+# min-area bounding rectangle (scan hull edges)
+# -----------------------------
+def _min_area_rect(points_xy: np.ndarray) -> Tuple[np.ndarray, float, float, float]:
+    """
+    points_xy: (N,2),建议输入 hull
+    returns center_xy(2,), w, h, yaw(rad) (yaw: CCW from world +x)
+    """
+    pts = np.asarray(points_xy, dtype=np.float64)
+    if pts.shape[0] == 0:
+        raise ValueError("Empty point set.")
+    if pts.shape[0] == 1:
+        return pts[0], 0.0, 0.0, 0.0
+    if pts.shape[0] == 2:
+        d = pts[1] - pts[0]
+        yaw = float(np.arctan2(d[1], d[0]))
+        center = (pts[0] + pts[1]) * 0.5
+        w = float(np.linalg.norm(d))
+        h = 0.0
+        return center, w, h, yaw
+
+    best = None  # (area, center_xy, w, h, yaw)
+    H = pts.shape[0]
+
+    for i in range(H):
+        p0 = pts[i]
+        p1 = pts[(i + 1) % H]
+        edge = p1 - p0
+        ang = float(np.arctan2(edge[1], edge[0]))
+
+        c, s = np.cos(-ang), np.sin(-ang)
+        R = np.array([[c, -s], [s, c]], dtype=np.float64)  # rotate by -ang
+        pr = pts @ R.T
+
+        minx, miny = pr.min(axis=0)
+        maxx, maxy = pr.max(axis=0)
+        w = maxx - minx
+        h = maxy - miny
+        area = w * h
+
+        center_r = np.array([(minx + maxx) * 0.5, (miny + maxy) * 0.5], dtype=np.float64)
+
+        c2, s2 = np.cos(ang), np.sin(ang)
+        Rinv = np.array([[c2, -s2], [s2, c2]], dtype=np.float64)
+        center_xy = center_r @ Rinv.T
+
+        if best is None or area < best[0]:
+            best = (area, center_xy, float(w), float(h), float(ang))
+
+    _, center_xy, w, h, yaw = best
+    yaw = (yaw + np.pi) % (2 * np.pi) - np.pi
+    return center_xy, w, h, yaw
+
+
+def _rect_corners_xy(center_xy: np.ndarray, w: float, h: float, yaw: float) -> np.ndarray:
+    """return 4 rectangle corners in xy, shape (4,2)"""
+    cx, cy = float(center_xy[0]), float(center_xy[1])
+    hx, hy = w * 0.5, h * 0.5
+    local = np.array([[ hx,  hy],
+                      [ hx, -hy],
+                      [-hx, -hy],
+                      [-hx,  hy]], dtype=np.float64)
+    c, s = np.cos(yaw), np.sin(yaw)
+    R = np.array([[c, -s], [s, c]], dtype=np.float64)
+    return local @ R.T + np.array([cx, cy], dtype=np.float64)[None, :]
+
+
+def _merge_world_corners_from_points(world_points: np.ndarray, force_w_ge_h: bool = True) -> np.ndarray:
+    """
+    world_points: (K,3) : all corners from all frames (already in world)
+    return merged world corners: (8,3)
+    """
+    zmin = float(world_points[:, 2].min())
+    zmax = float(world_points[:, 2].max())
+
+    hull = _convex_hull_2d(world_points[:, :2])
+    center_xy, w, h, yaw = _min_area_rect(hull)
+
+    # stabilize output (optional): always report w>=h
+    if force_w_ge_h and h > w:
+        w, h = h, w
+        yaw = yaw + np.pi / 2.0
+        yaw = (yaw + np.pi) % (2 * np.pi) - np.pi
+
+    c4 = _rect_corners_xy(center_xy, w, h, yaw)  # (4,2)
+    bottom = np.hstack([c4, np.full((4, 1), zmin, dtype=np.float64)])
+    top    = np.hstack([c4, np.full((4, 1), zmax, dtype=np.float64)])
+    return np.vstack([bottom, top])  # (8,3)
+
+
+# -----------------------------
+# main function
+# -----------------------------
+@torch.no_grad()
+def merge_scene_gt_corners_world_multiframe(
+    data_path: str,
+    image_idx: Union[List[int], np.ndarray, torch.Tensor],
+    extrinsic: Union[np.ndarray, torch.Tensor],  # [F,4,4] (or [F,3,4])
+    json_name_fmt: str = "instances_{idx}.json",
+    extrinsic_is_w2c: bool = True,     # True: w2c -> invert to c2w; False: already c2w
+    keep_single_view: bool = True,     # id only appears once -> directly transform corners
+    force_w_ge_h: bool = True,         # stabilize w/h & yaw
+    device: Union[str, torch.device, None] = None,
+) -> torch.Tensor:
+    """
+    Returns:
+        corners_world: torch.FloatTensor [N,8,3]  (scene-level per id, in world)
+
+    Notes:
+      - Each json is a list of dicts, each dict must contain:
+          b["id"] (string) and b["corners"] (8x3) in camera coordinates.
+      - Merge rule:
+          xy: all world corners -> 2D hull -> min-area rectangle
+          z : union (min/max)
+    """
+    # ---- normalize image_idx ----
+    if isinstance(image_idx, torch.Tensor):
+        idx_list = image_idx.detach().cpu().long().tolist()
+    else:
+        idx_list = list(np.asarray(image_idx).astype(int).tolist())
+    F = len(idx_list)
+    assert F > 0, "image_idx is empty."
+
+    # ---- normalize extrinsic to [F,4,4] numpy ----
+    if hasattr(extrinsic, "detach"):  # torch
+        ext_np = extrinsic.detach().cpu().numpy()
+    else:
+        ext_np = np.asarray(extrinsic)
+    assert ext_np.shape[0] == F, f"extrinsic first dim must match len(image_idx): {ext_np.shape[0]} vs {F}"
+
+    c2w_by_frame: Dict[int, np.ndarray] = {}
+    for i, idx in enumerate(idx_list):
+        Ti = _as_np_pose_4x4(ext_np[i])
+        if extrinsic_is_w2c:
+            Ti = _invert_pose_4x4(Ti)  # w2c -> c2w
+        c2w_by_frame[idx] = Ti
+
+    # ---- choose output device ----
+    if device is None:
+        device = extrinsic.device if hasattr(extrinsic, "device") else "cpu"
+
+    # ---- read all frames + group by id (insertion order) ----
+    buckets: "OrderedDict[str, List[Tuple[int, np.ndarray]]]" = OrderedDict()
+    for idx in idx_list:
+        json_path = os.path.join(data_path, json_name_fmt.format(idx=idx))
+        if not os.path.exists(json_path):
+            raise FileNotFoundError(f"Missing json: {json_path}")
+
+        with open(json_path, "r") as f:
+            inst_list = json.load(f)
+
+        if not isinstance(inst_list, list):
+            raise ValueError(f"Expect list in {json_path}, got {type(inst_list)}")
+
+        for b in inst_list:
+            bid = b["id"]
+            corners_cam = np.asarray(b["corners"], dtype=np.float64).reshape(8, 3)
+            if bid not in buckets:
+                buckets[bid] = []
+            buckets[bid].append((idx, corners_cam))
+
+    # ---- merge per id ----
+    merged_list = []
+    for bid, items in buckets.items():
+        if keep_single_view and len(items) == 1:
+            fidx, corners_cam = items[0]
+            corners_w = _transform_points_c2w(corners_cam, c2w_by_frame[fidx])  # (8,3)
+        else:
+            all_w = []
+            for fidx, corners_cam in items:
+                all_w.append(_transform_points_c2w(corners_cam, c2w_by_frame[fidx]))
+            all_w = np.concatenate(all_w, axis=0)  # (8*K,3)
+            corners_w = _merge_world_corners_from_points(all_w, force_w_ge_h=force_w_ge_h)  # (8,3)
+
+        merged_list.append(corners_w)
+    # if no valid GT boxes found, return empty tensor
+    if len(merged_list) == 0:
+        corners_world = np.zeros((1, 8, 3), dtype=np.float32)
+        return corners_world
+    
+    corners_world = np.stack(merged_list, axis=0)  # [N,8,3]
+    return corners_world
+
+
+def filter_gt_boxes_by_2d_valid_area_ratio_np(
+    filtered_bbox_corners,   # np.ndarray [N, 8, 3] (world coords)
+    intrinsics,              # np.ndarray [S, 3, 3]
+    extrinsics,              # np.ndarray [S, 4, 4]  (w2c by default; see extrinsic_is_c2w)
+    H, W,
+    thr=0.20,
+    extrinsic_is_c2w=False,  # True if extrinsics is c2w, will invert to w2c
+    eps=1e-6,
+    return_debug=False,
+):
+    """
+    Numpy版：根据 3D GT box 在多视角投影后的 2D bbox “有效区域比例”过滤。
+    - 投影得到每个 view 的 2D bbox (xyxy)，允许负数/超出边界（不截断）
+    - ratio = bbox与图像边界相交面积 / bbox自身面积
+    - keep_if_any_view 固定为 True：只要任意一张图 ratio>=thr 就保留
+
+    注意：
+    - 只使用 z>eps 的角点参与 min/max；某 view 没有任何角点在前方 -> ratio=0
+    - bbox 面积用原始 bbox（不clip），intersection 用 clip 后计算
+    """
+
+    corners = np.asarray(filtered_bbox_corners)
+    K = np.asarray(intrinsics)
+    E = np.asarray(extrinsics)
+
+    assert corners.ndim == 3 and corners.shape[1:] == (8, 3), corners.shape
+    assert K.ndim == 3 and K.shape[1:] == (3, 3), K.shape
+    assert E.ndim == 3 and E.shape[1:] == (4, 4), E.shape
+
+    N = corners.shape[0]
+    S = K.shape[0]
+    assert E.shape[0] == S
+
+    # use float64 for robustness
+    corners = corners.astype(np.float64, copy=False)
+    K = K.astype(np.float64, copy=False)
+    E = E.astype(np.float64, copy=False)
+
+    # w2c
+    if extrinsic_is_c2w:
+        w2c = np.linalg.inv(E)
+    else:
+        w2c = E
+
+    # corners_h: [N,8,4]
+    ones = np.ones((N, 8, 1), dtype=np.float64)
+    corners_h = np.concatenate([corners, ones], axis=-1)
+
+    # Expand to views: [S,N,8,4]
+    corners_h = np.broadcast_to(corners_h[None, ...], (S, N, 8, 4))
+
+    # IMPORTANT FIX: per-view transpose, NOT w2c.T
+    w2c_T = np.transpose(w2c, (0, 2, 1))  # [S,4,4]
+
+    # cam_h = corners_h @ w2c^T  (row vectors)
+    cam_h = np.einsum("snkj,sji->snki", corners_h, w2c_T)  # [S,N,8,4]
+    cam = cam_h[..., :3]                                   # [S,N,8,3]
+    x = cam[..., 0]
+    y = cam[..., 1]
+    z = cam[..., 2]
+
+    front = z > eps                                        # [S,N,8]
+    any_front = np.any(front, axis=-1)                     # [S,N]
+
+    # intrinsics params
+    fx = K[:, 0, 0].reshape(S, 1, 1)
+    fy = K[:, 1, 1].reshape(S, 1, 1)
+    cx = K[:, 0, 2].reshape(S, 1, 1)
+    cy = K[:, 1, 2].reshape(S, 1, 1)
+
+    z_safe = np.where(front, z, 1.0)                       # avoid div0
+    u = fx * (x / z_safe) + cx                              # [S,N,8]
+    v = fy * (y / z_safe) + cy
+
+    # ignore invalid points in min/max
+    u_min_src = np.where(front, u,  np.inf)
+    v_min_src = np.where(front, v,  np.inf)
+    u_max_src = np.where(front, u, -np.inf)
+    v_max_src = np.where(front, v, -np.inf)
+
+    x1 = np.min(u_min_src, axis=-1)                         # [S,N]
+    y1 = np.min(v_min_src, axis=-1)
+    x2 = np.max(u_max_src, axis=-1)
+    y2 = np.max(v_max_src, axis=-1)
+
+    # bbox area (no clip)
+    bw = np.clip(x2 - x1, 0.0, None)
+    bh = np.clip(y2 - y1, 0.0, None)
+    area = bw * bh                                          # [S,N]
+
+    # intersection with image bounds
+    ix1 = np.clip(x1, 0.0, float(W))
+    iy1 = np.clip(y1, 0.0, float(H))
+    ix2 = np.clip(x2, 0.0, float(W))
+    iy2 = np.clip(y2, 0.0, float(H))
+    iw = np.clip(ix2 - ix1, 0.0, None)
+    ih = np.clip(iy2 - iy1, 0.0, None)
+    inter = iw * ih                                         # [S,N]
+
+    ratio = np.zeros_like(inter, dtype=np.float64)
+    valid = (area > 0.0) & any_front
+    ratio[valid] = inter[valid] / (area[valid] + 1e-12)
+
+    # keep_if_any_view=True
+    score = np.max(ratio, axis=0)                            # [N]
+    keep = score >= float(thr)
+    kept_corners = corners[keep]                             # [N_keep,8,3]
+
+    if not return_debug:
+        return kept_corners, keep
+
+    boxes_xyxy = np.stack([x1, y1, x2, y2], axis=-1)          # [S,N,4]
+    return kept_corners, keep, boxes_xyxy, ratio

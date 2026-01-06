@@ -990,7 +990,8 @@ def compute_box_logit_loss_single(
     
 
     # 1) 构造代价矩阵（包含 Chamfer 距离和 logit 代价）
-    cost_kwargs = dict(chamfer_weight=1.0, class_weight=1.0, giou_weight=1.0) # 1.0 chamfer_weight=2.0, class_weight=0.3, giou_weight=1.0
+    # cost_kwargs = dict(chamfer_weight=1.0, class_weight=1.0, giou_weight=1.0) # 1.0 chamfer_weight=2.0, class_weight=0.3, giou_weight=1.0
+    cost_kwargs = dict(chamfer_weight=1.0, class_weight=2.0, giou_weight=1.5) # 1.0 chamfer_weight=2.0, class_weight=0.3, giou_weight=1.0
     cost_bbox = build_3d_cost_logits(pred_corners, gt_corners, pred_logits, cost_kwargs)
     
     # 2) 匈牙利匹配

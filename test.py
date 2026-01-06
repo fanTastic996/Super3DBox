@@ -364,21 +364,59 @@ def filter_3d_corners(corners, K, poses, depth_maps,
         return corners
 
 
-seq_name= '42444750'
-data_dir = '/data/lyq/ca1m/ca1m/train-CA-1M-slam/'
-image_idxs = [180, 200]
-# Load sequence data
-scene_data = load_scene_data(seq_name, data_dir)
-# Load Box GT information
-filtered_bbox_corners = filter_gt_boxes_for_images(scene_data, image_idxs)
-print("filtered_bbox_corners:", filtered_bbox_corners.shape)
+# seq_name= '42444750'
+# data_dir = '/data/lyq/ca1m/ca1m/train-CA-1M-slam/'
+# image_idxs = [180, 200]
+# # Load sequence data
+# scene_data = load_scene_data(seq_name, data_dir)
+# # Load Box GT information
+# filtered_bbox_corners = filter_gt_boxes_for_images(scene_data, image_idxs)
+# print("filtered_bbox_corners:", filtered_bbox_corners.shape)
 
 
-# ------------------ 用法示例 ------------------
-# boxes: np.ndarray 形如 [N,8,3]
-upright, tilted_mask, tilt_degs = upright_boxes(filtered_bbox_corners, tilt_deg_thresh=5.0)
-# upright 即为处理后的 [N,8,3]；tilted_mask 标出哪些被旋正；tilt_degs 给出每个 box 的倾斜角。
-print("upright boxes shape:", upright.shape)
-print('tilted_mask', tilted_mask)
-np.save('/home/lanyuqing/myproject/vggt/vis_results/gt_box.npy',filtered_bbox_corners[tilted_mask])
-np.save('/home/lanyuqing/myproject/vggt/vis_results/upright_boxes.npy', upright[tilted_mask])
+# # ------------------ 用法示例 ------------------
+# # boxes: np.ndarray 形如 [N,8,3]
+# upright, tilted_mask, tilt_degs = upright_boxes(filtered_bbox_corners, tilt_deg_thresh=5.0)
+# # upright 即为处理后的 [N,8,3]；tilted_mask 标出哪些被旋正；tilt_degs 给出每个 box 的倾斜角。
+# print("upright boxes shape:", upright.shape)
+# print('tilted_mask', tilted_mask)
+# np.save('/home/lanyuqing/myproject/vggt/vis_results/gt_box.npy',filtered_bbox_corners[tilted_mask])
+# np.save('/home/lanyuqing/myproject/vggt/vis_results/upright_boxes.npy', upright[tilted_mask])
+
+
+
+import os
+
+# seqs = os.listdir('/data1/lyq/CA1M-dataset/CA1M-dataset/training')
+# seqs = os.listdir('/data1/lyq/CA1M_train_slam')
+# seqs = sorted([seq for seq in seqs if not seq.endswith('.txt')])
+# print(len(seqs))
+# for seq in seqs:
+#     print(seq)
+
+
+seqs = os.listdir('/data1/lyq/CA1M_train_slam')
+seqs = sorted([seq for seq in seqs if not seq.endswith('.txt')])
+
+with open('/data1/lyq/CA1M_train_slam/train_list.txt', 'w') as f:
+    for seq in seqs:
+        f.write(seq + '\n')
+
+# final_not = []
+# depth_num = []
+# instances_num = []
+# for seq in seqs:
+#     if 'instances' not in os.listdir(os.path.join('/data1/lyq/CA1M-dataset/CA1M-dataset/training', seq)):
+#         final_not.append(seq)
+# print("final_not", len(final_not))
+# for seq in final_not:
+#     print(seq)
+# for seq in seqs:
+#     depth_num = len(os.listdir(os.path.join('/data1/lyq/CA1M-dataset/CA1M-dataset/training', seq, 'depth')))
+#     instances_num = len(os.listdir(os.path.join('/data1/lyq/CA1M-dataset/CA1M-dataset/training', seq, 'instances')))
+
+# list_117 = np.loadtxt('test117.txt', dtype=str)
+# for seq in seqs:
+#     if seq  not in list_117:
+#         print(seq)
+        

@@ -91,7 +91,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                             ClassPredictor(embed_dim=cubify_embed_dim, num_classes=2, num_layers=None),
                             DeltaBox2DPredictor(embed_dim=cubify_embed_dim, num_layers=3),
                         ],
-                        top_k_test=100, #300,
+                        top_k_test=50 #100, #300,
                     ),
                 ],
                 encoders=PromptEncoders(
@@ -148,8 +148,10 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
             # frame_merger=AttentionFusionWithTorch(embed_dim=256, num_heads=8),
             # frame_merger=LightweightCrossViewFusion(feat_dim=256),
             pixel_mean=[123.675, 116.28, 103.53],
-            pixel_std=[58.395, 57.12, 57.375]) if enable_cubify else None
-        
+            pixel_std=[58.395, 57.12, 57.375],
+            topk_per_image=50) if enable_cubify else None
+            #TODO: change 100->50
+            
     def forward(self, images: torch.Tensor, intrinsics: torch.Tensor= None, extrinsics: torch.Tensor= None, query_points: torch.Tensor = None):
         """
         Forward pass of the VGGT model.

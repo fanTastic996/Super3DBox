@@ -162,12 +162,14 @@ class Trainer:
             self._load_resuming_checkpoint_mine(self.checkpoint_conf.resume_checkpoint_path, self.checkpoint_conf.cubify_checkpoint_path)
         
         else:   
-            if self.checkpoint_conf.pretrained_model is not None:
-                ckpt_path = self.checkpoint_conf.pretrained_model
+            if self.checkpoint_conf.pretrained_path is not None:
+                ckpt_path = self.checkpoint_conf.pretrained_path
             else:
                 ckpt_path = get_resume_checkpoint(self.checkpoint_conf.save_dir)
             if ckpt_path is not None:
-                self._load_resuming_checkpoint(ckpt_path)
+                # self._load_resuming_checkpoint(ckpt_path)
+                # self._load_resuming_checkpoint_restart(ckpt_path)
+                self._load_resuming_checkpoint_temp(ckpt_path)
 
         # Wrap the model with DDP
         self._setup_ddp_distributed_training(distributed, device)
@@ -203,7 +205,7 @@ class Trainer:
         )
         self.rank = dist.get_rank()
 
-    def _load_resuming_checkpoint(self, ckpt_path: str):
+    def _load_resuming_checkpoint_restart(self, ckpt_path: str):
         """Loads a checkpoint from the given path to resume training."""
         logging.info(f"Resuming training from {ckpt_path} (rank {self.rank})")
 
@@ -219,12 +221,51 @@ class Trainer:
         #     logging.info(f"Model state loaded. Missing keys: {missing or 'None'}. Unexpected keys: {unexpected or 'None'}.")
 
         # Load optimizer state if available and in training mode
+        # if "optimizer" in checkpoint:
+        #     logging.info(f"Loading optimizer state dict (rank {self.rank})")
+        #     self.optims[0].optimizer.load_state_dict(checkpoint["optimizer"])
+
+        # Load training progress prev_epoch
+        # if "epoch" in checkpoint:
+        # if "prev_epoch" in checkpoint:
+        #     self.epoch = checkpoint["prev_epoch"] + 1
+        #     logging.info(f"Loading epoch start (epoch: {self.epoch})")
+            
+        # self.steps = checkpoint["steps"] if "steps" in checkpoint else {"train": 0, "val": 0}
+        # self.ckpt_time_elapsed = checkpoint.get("time_elapsed", 0)
+
+        # Load AMP scaler state if available
+        # if self.optim_conf.amp.enabled and "scaler" in checkpoint:
+            # self.scaler.load_state_dict(checkpoint["scaler"])
+    
+    def _load_resuming_checkpoint(self, ckpt_path: str):
+        """Loads a checkpoint from the given path to resume training."""
+        logging.info(f"Resuming training from {ckpt_path} (rank {self.rank})")
+
+        with g_pathmgr.open(ckpt_path, "rb") as f:
+            checkpoint = torch.load(f, map_location="cpu")
+        
+        # Load model state
+        model_state_dict = checkpoint["model"] if "model" in checkpoint else checkpoint
+        
+        #TODO: 过滤掉 gravity_head 的所有 key
+        # keys_to_remove = [k for k in model_state_dict.keys() if k.startswith("gravity_head.")]
+        # for k in keys_to_remove:
+        #     print(f"Removing {k}")
+        #     del model_state_dict[k]
+                
+        missing, unexpected = self.model.load_state_dict(
+            model_state_dict, strict=self.checkpoint_conf.strict
+        )
+        if self.rank == 0:
+            logging.info(f"Model state loaded. Missing keys: {missing or 'None'}. Unexpected keys: {unexpected or 'None'}.")
+
+        # Load optimizer state if available and in training mode
         if "optimizer" in checkpoint:
             logging.info(f"Loading optimizer state dict (rank {self.rank})")
             self.optims[0].optimizer.load_state_dict(checkpoint["optimizer"])
 
         # Load training progress prev_epoch
-        # if "epoch" in checkpoint:
         if "prev_epoch" in checkpoint:
             self.epoch = checkpoint["prev_epoch"] + 1
             logging.info(f"Loading epoch start (epoch: {self.epoch})")
@@ -236,6 +277,109 @@ class Trainer:
         if self.optim_conf.amp.enabled and "scaler" in checkpoint:
             self.scaler.load_state_dict(checkpoint["scaler"])
 
+    def _load_resuming_checkpoint_temp(self, ckpt_path):
+        """Loads a checkpoint from the given path to resume training."""
+        import logging
+        import torch
+
+        logging.info(f"Resuming training from {ckpt_path} (rank {self.rank})")
+
+        with g_pathmgr.open(ckpt_path, "rb") as f:
+            checkpoint = torch.load(f, map_location="cpu")
+
+        # Load model state
+        model_state_dict = checkpoint["model"] if "model" in checkpoint else checkpoint
+
+        # ------------------------------------------------------------
+        # Patch: replace ALL box_head.prompting.* from cutr_rgb.pth
+        # EXCEPT: keep ckpt_path's box_head.prompting.prompters.1.query_embed.weight
+        # ------------------------------------------------------------
+        cutr_path = "/home/lanyuqing/model/cutr_rgb.pth"
+        exception_key = "box_head.prompting.prompters.1.query_embed.weight"
+
+        # 1) Backup exception strictly from ckpt_path model_state_dict
+        if exception_key not in model_state_dict:
+            raise KeyError(f"[prompting-patch] exception key not found in resume ckpt: {exception_key}")
+        exception_tensor = model_state_dict[exception_key]  # keep ckpt_path value
+
+        try:
+            with g_pathmgr.open(cutr_path, "rb") as f:
+                cutr_ckpt = torch.load(f, map_location="cpu")
+
+            # find cutr state_dict container
+            cutr_sd = None
+            if isinstance(cutr_ckpt, dict):
+                for k in ["model", "state_dict", "net", "module", "model_state_dict"]:
+                    if k in cutr_ckpt and isinstance(cutr_ckpt[k], dict):
+                        cutr_sd = cutr_ckpt[k]
+                        break
+            if cutr_sd is None:
+                cutr_sd = cutr_ckpt  # maybe already a state_dict
+
+            replaced = 0
+            skipped_missing = 0
+            skipped_shape = 0
+
+            for k, v in cutr_sd.items():
+                # cutr keys are like "prompting...."
+                if not isinstance(k, str) or not k.startswith("prompting."):
+                    continue
+
+                target_k = "box_head." + k  # map to A namespace
+
+                # never overwrite exception
+                if target_k == exception_key:
+                    continue
+
+                if target_k not in model_state_dict:
+                    skipped_missing += 1
+                    continue
+
+                tv = model_state_dict[target_k]
+                if isinstance(tv, torch.Tensor) and isinstance(v, torch.Tensor) and tv.shape == v.shape:
+                    model_state_dict[target_k] = v
+                    replaced += 1
+                else:
+                    skipped_shape += 1
+
+            # 2) Restore exception from ckpt_path (guaranteed)
+            model_state_dict[exception_key] = exception_tensor
+
+            logging.info(
+                f"[prompting-patch] patched from {cutr_path}: replaced={replaced}, "
+                f"skipped_missing={skipped_missing}, skipped_shape={skipped_shape}, "
+                f"preserved='{exception_key}' from resume ckpt"
+            )
+
+        except Exception as e:
+            # Even if patch fails, still preserve ckpt_path exception
+            model_state_dict[exception_key] = exception_tensor
+            logging.warning(f"[prompting-patch] Failed to patch prompting from {cutr_path}: {type(e).__name__}: {e}")
+
+        # Now load to self.model
+        missing, unexpected = self.model.load_state_dict(
+            model_state_dict, strict=self.checkpoint_conf.strict
+        )
+        # logging.info(f"Missing: {missing}, Unexpected: {unexpected}")
+
+        # Load optimizer state if available and in training mode
+        if "optimizer" in checkpoint:
+            logging.info(f"Loading optimizer state dict (rank {self.rank})")
+            self.optims[0].optimizer.load_state_dict(checkpoint["optimizer"])
+
+        # Load training progress prev_epoch
+        if "prev_epoch" in checkpoint:
+            self.epoch = checkpoint["prev_epoch"] + 1
+            logging.info(f"Loading epoch start (epoch: {self.epoch})")
+
+        self.steps = checkpoint["steps"] if "steps" in checkpoint else {"train": 0, "val": 0}
+        self.ckpt_time_elapsed = checkpoint.get("time_elapsed", 0)
+
+        # Load AMP scaler state if available
+        if self.optim_conf.amp.enabled and "scaler" in checkpoint:
+            self.scaler.load_state_dict(checkpoint["scaler"])
+    
+    
     def _load_resuming_checkpoint_mine(self, ckpt_path, cubify_path, load_cubify=True):
         """Loads a checkpoint from the given path to resume training."""
         logging.info(f"Resuming training from {ckpt_path} (rank {self.rank})")
@@ -305,7 +449,7 @@ class Trainer:
         logging.info("Setting up components: Model, Loss, Logger, etc.")
         self.epoch = 0
         self.steps = {'train': 0, 'val': 0}
-
+        
         # Instantiate components from configs
         self.tb_writer = instantiate(self.logging_conf.tensorboard_writer, _recursive_=False)
         self.model = instantiate(self.model_conf, _recursive_=False)
@@ -466,8 +610,8 @@ class Trainer:
             # Skips validation after the last training epoch, as it can be run separately.
             
             # TODO: note this val step, since we aim to overfit the small training sets.
-            # if self.epoch % self.val_epoch_freq == 0 and self.epoch < self.max_epochs - 1:
-            #     self.run_val()
+            if self.epoch % self.val_epoch_freq == 0 and self.epoch < self.max_epochs - 1:
+                self.run_val()
             
             self.epoch += 1
         
@@ -545,6 +689,14 @@ class Trainer:
             else:
                 amp_type = torch.float16
             
+            # save visualization results:
+            if (data_iter) % self.logging_conf.save_vis_freq_val==0 and data_iter > 0:
+                self.save_flag = True
+                self.temp_iter = data_iter
+            else:
+                self.save_flag=False
+            
+            
             # compute output
             with torch.no_grad():
                 with torch.cuda.amp.autocast(
@@ -552,7 +704,7 @@ class Trainer:
                     dtype=amp_type,
                 ):
                     val_loss_dict = self._step(
-                        batch, self.model, phase, loss_meters
+                        batch, self.model, phase, loss_meters, val_flag=True
                     )
 
             # measure elapsed time
@@ -886,24 +1038,34 @@ class Trainer:
             # exit(0)
         return batch
 
-    def _save_results(self, y_hat):
+    def _save_results(self, y_hat, val_flag=False):
         save_dict = {}
               
-        for key in ['images', 'ids', 'extrinsics', 'intrinsics', 'pred_corners', 'pred_logits', 'pred_scores', 'pred_R', 'pred_center', 'pred_size']:
+        for key in ['images', 'seq_name', 'ids', 'extrinsics', 'intrinsics', 'pred_corners', 'pred_logits', 'pred_scores', 'pred_R', 'pred_center', 'pred_size']:
             if key in y_hat:
-                save_dict[key] = y_hat[key][0].detach().cpu().numpy() # 第一个seq
+                value = y_hat[key][0]
+                # 如果value有detach方法则说明是tensor，否则直接赋值
+                if hasattr(value, "detach"):
+                    save_dict[key] = value.detach().cpu().numpy()
+                else:
+                    save_dict[key] = value
         
         save_dir = self.logging_conf.result_dir
         os.makedirs(save_dir, exist_ok=True)
         
         print("Saving predictions...")
         # 保存到文件
-        with open(os.path.join(save_dir, f'{self.temp_iter}_{self.epoch}_box.pkl'), 'wb') as f:
-            pickle.dump(save_dict, f)  # 序列化并写入
-        print("saved to ", os.path.join(save_dir, f'{self.temp_iter}_{self.epoch}_box.pkl'))
+        if val_flag:
+            with open(os.path.join(save_dir, f'{self.temp_iter}_{self.epoch}_box_val.pkl'), 'wb') as f:
+                pickle.dump(save_dict, f)  # 序列化并写入
+                print("saved to ", os.path.join(save_dir, f'{self.temp_iter}_{self.epoch}_box_val.pkl'))
+        else:
+            with open(os.path.join(save_dir, f'{self.temp_iter}_{self.epoch}_box.pkl'), 'wb') as f:
+                pickle.dump(save_dict, f)  # 序列化并写入
+                print("saved to ", os.path.join(save_dir, f'{self.temp_iter}_{self.epoch}_box.pkl'))
             
     #@!
-    def _step(self, batch, model: nn.Module, phase: str, loss_meters: dict):
+    def _step(self, batch, model: nn.Module, phase: str, loss_meters: dict, val_flag: bool = False):
         """
         Performs a single forward pass, computes loss, and logs results.
         
@@ -917,8 +1079,9 @@ class Trainer:
         y_hat = model(images=batch["images"])
         # y_hat = model(images=batch["images"], intrinsics=batch["intrinsics"], extrinsics=batch["extrinsics"])
         y_hat['ids'] = batch['ids']
+        y_hat['seq_name'] = batch['seq_name']
         if self.save_flag:
-            self._save_results(y_hat)
+            self._save_results(y_hat, val_flag=val_flag)
             
         # Loss computation
         loss_dict = self.loss(y_hat, batch)
