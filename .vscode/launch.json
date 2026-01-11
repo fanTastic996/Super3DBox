@@ -42,7 +42,7 @@
             "program": "${workspaceFolder}/demo_box.py",
             "cwd": "${workspaceFolder}", 
             "env": {
-              "CUDA_VISIBLE_DEVICES": "2",   // 只用 0 号卡
+              "CUDA_VISIBLE_DEVICES": "1",   // 只用 0 号卡
           },
         }
     ]

@@ -556,9 +556,6 @@ class CubifyHead(nn.Module):
         intrinsic=None,
         extrinsic=None,
         gravity=None,
-        do_preprocess: bool = True,  # 是否执行预处理（保留接口）
-        do_postprocess: bool = True,  # 是否执行后处理（保留接口）
-        training: bool = True,
     ):        
         self.init_sensor()
         all_results=[]
@@ -642,7 +639,7 @@ class CubifyHead(nn.Module):
         # 特征融合
         #extract VGGT增强的3D视觉特征
         # vggt_features = self.extract_image_vggt_embeds_3d_direct(aggregated_tokens_list[-2],patch_start_idx,img_H,img_W)  # [batch_size, num_frames, C, H, W]
-
+        vggt_features = aggregated_tokens_list[-1][:, :, patch_start_idx:, :]
 
         # vggt_features = vggt_features.view(src_flatten.shape[0],-1,vggt_features.shape[-1])  
         
@@ -678,6 +675,7 @@ class CubifyHead(nn.Module):
         lvl_pos_embed = lvl_pos_embed.repeat(1, N_img, 1)
         
         _, intermediate_preds = self.decoder(
+            vggt_features,
             fused_features, lvl_pos_embed, mask_flatten, spatial_shapes, 
             level_start_index, valid_ratios, prompts, sensor, N_batch, N_img
         )
@@ -714,11 +712,179 @@ class CubifyHead(nn.Module):
         return all_results
 
 
+    def train_step(
+        self,
+        vggt_images,  # 批处理的传感器数据字典 # vggt images: ([4(B), 3(N), 3, 476, 518])
+        aggregated_tokens_list, #N个[266, 2048]的list
+        patch_start_idx,
+        intrinsic=None,
+        extrinsic=None,
+        gravity=None,
+    ):        
+        self.init_sensor()
+        all_results=[]
+        
+        N_batch = vggt_images.shape[0]
+        N_img = vggt_images.shape[1]
+        img_H = vggt_images.shape[-2]
+        img_W = vggt_images.shape[-1]
+        #sensor_info: .wide.image .wide.image.K .wide.T_gravity .wide.RT
+        
+        #>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        all_packaged = []
+
+        for j in range(N_batch): # 一个个batch轮流来，因为cubify不支持
+        #     # 1.gravity 特征提取（主干网络）
+            sample = {"wide": {'image': vggt_images[j]},
+                      "sensor_info": self.sensor_info}
+            
+            sample["wide"]['image'] = (sample["wide"]['image'] * 255.).to(torch.uint8)
+
+            if intrinsic is not None and extrinsic is not None:
+                sample["sensor_info"].wide.image = sample["sensor_info"].wide.image.resize((img_H, img_W))  #TODO: changed img_H, img_W
+                sample["sensor_info"].wide.image.K[0,:3,:3] = intrinsic[j,0].detach().cpu()[:3,:3]
+            
+            # GT T_gravity
+            # sample["sensor_info"].wide.T_gravity = gravity[j]
+            
+            packaged = self.augmentor.package(sample)
+            device = self.pixel_mean
+            packaged = move_input_to_current_device(packaged, device)
+            all_packaged.append(packaged)
+            
+        batched_sensors = self.preprocessor.preprocess(all_packaged)
+        
+        sensor = batched_sensors[self.sensor_name]   
+        if len(sensor['image'].data.tensor.shape) > 4:
+            sensor['image'].data.tensor = sensor['image'].data.tensor.squeeze(0) 
+        if len(sensor['image'].data.tensor.shape) > 4:
+            sensor['image'].data.tensor = sensor['image'].data.tensor.view(N_batch*N_img, 3, sensor['image'].data.tensor.shape[-2], sensor['image'].data.tensor.shape[-1])
+        
+        #TODO:
+        '''
+        sensor['image'].data.image_sizes改成有多少张图就多少个image_sizes
+        sensor['image'].sensor是一个list[],每个元素代表一张图像，需要将VGGT的pose赋值到RT
+        sensor['image'].sensor[index].image是一个ImageMeasurementInfo,需要将该变量的.K更改为每张图的实际内参[1,3,3]
+        '''
+        sensor['image'].data.image_sizes = sensor['image'].data.image_sizes * N_img #不确定这里要不要乘batch
+        # base_sensor = sensor["image"].sensor[0]
+        # for j in range(N_batch):
+        #     sensor["image"].sensor[j].RT = sensor["image"].sensor[j].RT.repeat(N_img,1,1)
+        #     sensor["image"].sensor[j].image.K = sensor["image"].sensor[j].image.K.repeat(N_img,1,1)
+        #     sensor["image"].sensor[j].RT[:,:3,:4] = extrinsic[j, ...]
+        #     sensor["image"].sensor[j].image.K = intrinsic[j]
+            
+        features = self.backbone(sensor)
+
+        
+
+        #sensor: image: 
+        # data: tensor: [4, 3, H, W]  image_sizes: [(518, 518), (518, 518)]
+        # info: [<cubifyanything.measurement.ImageMeasurementInfo object at 0x7f300c1adae0>, <cubifyanything.measurement.ImageMeasurementInfo object at 0x7f3036154040>]: K/size
+        # 2. 准备多尺度特征
+        srcs, masks, pos_embeds = [], [], []
+        for l, (feat, info_) in enumerate(zip(features, sensor["image"].info)):
+            # 计算位置编码（融合相机参数）
+
+            pos_embeds_ = self.pos_embedding(feat, sensor)
+            pos_embeds.append(pos_embeds_)
+            
+            # 分离特征和掩码
+            src, mask = feat.decompose()
+            # 投影到解码器维度
+            # srcs.append(self.input_proj[l](src))
+            srcs.append(self.input_proj[0](src))
+            masks.append(mask)
+        
+        # 3. 展平特征（适配Transformer结构）
+        flattened = self._flatten(srcs, pos_embeds, masks)
+        src_flatten, lvl_pos_embed, mask_flatten, spatial_shapes, level_start_index, valid_ratios = flattened  
+
+        # 特征融合
+        # extract VGGT增强的3D视觉特征
+        # vggt_features = self.extract_image_vggt_embeds_3d_direct(aggregated_tokens_list[-2],patch_start_idx,img_H,img_W)  # [batch_size, num_frames, C, H, W]
+        vggt_features = aggregated_tokens_list[-1][:, :, patch_start_idx:, :]
+
+
+        # vggt_features = vggt_features.view(src_flatten.shape[0],-1,vggt_features.shape[-1])  
+        
+        # multiframe_fused_features = self.fusion_module(src_flatten, vggt_features, mask_flatten)
+        
+        fused_features = src_flatten # single frame
+        # fused_features = multiframe_fused_features #.reshape(1, -1, 256)  #[1, N*single_img_token, 256]
+        
+        fused_features = rearrange(fused_features, '(b n) c d -> b (n c) d', b = N_batch, n = N_img)
+        mask_flatten = mask_flatten.reshape(N_batch, -1)
+        
+        # valid_ratios = valid_ratios.reshape(N)
+        
+
+        # 4. 生成提示（Prompt）
+        '''
+        Prompter的核心作用是根据图像特征生成​​物体查询（Object Queries）​​，这些查询作为Decoder的输入，承载了模型对场景中“可能存在哪些物体”的初始假设。其本质是一种​​物体候选生成器​​，类似于2D检测中的Region Proposal Network（RPN）
+        '''
+        # Mask_flatten 标识特征图中哪些位置是有效数据（非填充区域）与src_flatten相对应
+        # valid_ratios ​有效图像区域相对于填充后图像尺寸的比例
+    
+        
+        embedding_dim = fused_features.shape[-1]
+        # generate box 2d proposals and queries
+        prompts = self.prompting.get_image_prompts(
+            fused_features, mask_flatten, spatial_shapes, sensor, N_batch, N_img, embedding_dim
+        ) 
+        prompters = self.prompting.prompters
+        # 5. 解码器处理（核心预测流程）
+        '''
+        Decoder接收Prompter生成的Object Queries，通过与图像特征的交互（注意力机制）逐步优化这些查询，最终输出精确的3D检测结果
+        '''
+        lvl_pos_embed = lvl_pos_embed.repeat(1, N_img, 1)
+        
+        _, intermediate_preds = self.decoder(
+            vggt_features,
+            fused_features, lvl_pos_embed, mask_flatten, spatial_shapes, 
+            level_start_index, valid_ratios, prompts, sensor, N_batch, N_img
+        )
+        
+        # 6. 处理最后层输出
+        # layer_number = len(intermediate_preds)
+        
+        prompt_outputs = intermediate_preds #[-1] old
+        prompt_start_idx = 0
+        results = None
+        
+        # 7. 遍历所有提示器生成最终预测
+        for prompter_index, (prompt, prompter) in enumerate(zip(prompts, prompters)):
+            # 提取当前提示器对应的输出
+            prompt_outputs_ = [
+                pred[prompt_start_idx:prompt_start_idx+prompt.number_prompts] 
+                for pred in prompt_outputs
+            ]
+            
+            # 仅处理需要输出的提示
+            if prompt.has_output:
+                # 调用提示器的推理方法（如框预测、分割等）
+                for prompt_outputs__ in prompt_outputs_:
+                    results = prompter.inference( # only encoderproposals prompter since metric queries have already been done in previous steps.
+                                    prompt_outputs__, sensor, 
+                                    self.topk_per_image,
+                                    intrinsic, extrinsic, gravity
+                                )
+                    all_results.append(results)
+                prompt_start_idx += prompt.number_prompts
+                
+                # all_results = results # List: len=N_batch
+                break  # 通常只有一个提示器产生输出
+                
+   
+        return all_results
 
 
     def forward(self, batched_inputs, aggregated_tokens_list, patch_start_idx, intrinsic=None, extrinsic=None, gravity=None, do_postprocess=True, training=True):
         """训练/推理的统一入口（实际调用推理函数）"""
-        return self.inference(batched_inputs, aggregated_tokens_list, patch_start_idx, intrinsic=intrinsic, extrinsic=extrinsic, gravity=gravity, training=training)
+        if training:
+            return self.train_step(batched_inputs, aggregated_tokens_list, patch_start_idx, intrinsic=intrinsic, extrinsic=extrinsic, gravity=gravity)
+        else:
+            return self.inference(batched_inputs, aggregated_tokens_list, patch_start_idx, intrinsic=intrinsic, extrinsic=extrinsic, gravity=gravity)
 
     def extract_image_vggt_embeds_3d(
         self,

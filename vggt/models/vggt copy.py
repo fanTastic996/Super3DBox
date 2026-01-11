@@ -91,7 +91,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                             ClassPredictor(embed_dim=cubify_embed_dim, num_classes=2, num_layers=None),
                             DeltaBox2DPredictor(embed_dim=cubify_embed_dim, num_layers=3),
                         ],
-                        top_k_test=100 #100, #300,
+                        top_k_test=50 #100, #300,
                     ),
                 ],
                 encoders=PromptEncoders(
@@ -149,10 +149,10 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
             # frame_merger=LightweightCrossViewFusion(feat_dim=256),
             pixel_mean=[123.675, 116.28, 103.53],
             pixel_std=[58.395, 57.12, 57.375],
-            topk_per_image=200) if enable_cubify else None
+            topk_per_image=50) if enable_cubify else None
             #TODO: change 100->50
             
-    def forward(self, images: torch.Tensor, intrinsics: torch.Tensor= None, extrinsics: torch.Tensor= None, query_points: torch.Tensor = None, inference_tag=False):
+    def forward(self, images: torch.Tensor, intrinsics: torch.Tensor= None, extrinsics: torch.Tensor= None, query_points: torch.Tensor = None):
         """
         Forward pass of the VGGT model.
 
@@ -222,80 +222,80 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                 gravity_init = gravity_encoding_to_extri_intri(predictions["gravity_enc"], images.shape[-2:]) #[B,N,3,4] every single frame has a pred gravity
                 gravity = gravity_init[:,:,:3,:3] #[B,1,3,3]
                 
-                # if not inference_tag:
-                #     box_result = self.box_head(
-                #         images,
-                #         aggregated_tokens_list,
-                #         patch_start_idx,
-                #         intrinsic=intrinsic,
-                #         extrinsic=extrinsic,
-                #         gravity=gravity,
-                #         training=True
-                #     )
-                # else:
-                box_result = self.box_head(
-                    images,
-                    aggregated_tokens_list,
-                    patch_start_idx,
-                    intrinsic=intrinsic,
-                    extrinsic=extrinsic,
-                    gravity=gravity,
-                    training=False
-                )
+                if self.training:
+                    box_result = self.box_head(
+                        images,
+                        aggregated_tokens_list,
+                        patch_start_idx,
+                        intrinsic=intrinsic,
+                        extrinsic=extrinsic,
+                        gravity=gravity,
+                        training=True
+                    )
+                else:
+                    box_result = self.box_head(
+                        images,
+                        aggregated_tokens_list,
+                        patch_start_idx,
+                        intrinsic=intrinsic,
+                        extrinsic=extrinsic,
+                        gravity=gravity,
+                        training=False
+                    )
 
-                # if not inference_tag:
-                #     def _is_batch_instances_list(x):
-                #         return isinstance(x, (list, tuple)) and len(x) > 0 and hasattr(x[0], "pred_logits")
+                if self.training:
+                    def _is_batch_instances_list(x):
+                        return isinstance(x, (list, tuple)) and len(x) > 0 and hasattr(x[0], "pred_logits")
 
-                #     if isinstance(box_result, (tuple, list)) and len(box_result) == 2 and not _is_batch_instances_list(box_result[0]):
-                #         _, box_results_layers = box_result
-                #     else:
-                #         box_results_layers = box_result
+                    if isinstance(box_result, (tuple, list)) and len(box_result) == 2 and not _is_batch_instances_list(box_result[0]):
+                        _, box_results_layers = box_result
+                    else:
+                        box_results_layers = box_result
 
-                #     if _is_batch_instances_list(box_results_layers):
-                #         box_results_layers = [box_results_layers]  # -> List[1] of List[B]
+                    if _is_batch_instances_list(box_results_layers):
+                        box_results_layers = [box_results_layers]  # -> List[1] of List[B]
 
-                #     L = len(box_results_layers)
-                #     B = len(box_results_layers[0])
+                    L = len(box_results_layers)
+                    B = len(box_results_layers[0])
 
-                #     # 转置：List[L][B] -> List[B][L]
-                #     # box_results[b][l] 是第 b 个样本在第 l 层 decoder 的 Instances3D
-                #     box_results = [list(x) for x in zip(*box_results_layers)]  # len=B, each len=L
+                    # 转置：List[L][B] -> List[B][L]
+                    # box_results[b][l] 是第 b 个样本在第 l 层 decoder 的 Instances3D
+                    box_results = [list(x) for x in zip(*box_results_layers)]  # len=B, each len=L
 
-                #     # 现在保持原 key，但每个 batch 元素里是一个“层列表”
-                #     predictions["pred_corners"] = [
-                #         [box_results[b][l].pred_boxes_3d.corners for l in range(L)]
-                #         for b in range(B)
-                #     ]
-                #     predictions["pred_logits"] = [
-                #         [box_results[b][l].pred_logits for l in range(L)]
-                #         for b in range(B)
-                #     ]
-                #     predictions["pred_scores"] = [
-                #         [box_results[b][l].scores for l in range(L)]
-                #         for b in range(B)
-                #     ]
-                #     predictions["pred_R"] = [
-                #         [box_results[b][l].pred_boxes_3d.R for l in range(L)]
-                #         for b in range(B)
-                #     ]
-                #     predictions["pred_center"] = [
-                #         [box_results[b][l].pred_boxes_3d.gravity_center for l in range(L)]
-                #         for b in range(B)
-                #     ]
-                #     predictions["pred_size"] = [
-                #         [box_results[b][l].pred_boxes_3d.dims for l in range(L)]
-                #         for b in range(B)
-                #     ]
+                    # 现在保持原 key，但每个 batch 元素里是一个“层列表”
+                    predictions["pred_corners"] = [
+                        [box_results[b][l].pred_boxes_3d.corners for l in range(L)]
+                        for b in range(B)
+                    ]
+                    predictions["pred_logits"] = [
+                        [box_results[b][l].pred_logits for l in range(L)]
+                        for b in range(B)
+                    ]
+                    predictions["pred_scores"] = [
+                        [box_results[b][l].scores for l in range(L)]
+                        for b in range(B)
+                    ]
+                    predictions["pred_R"] = [
+                        [box_results[b][l].pred_boxes_3d.R for l in range(L)]
+                        for b in range(B)
+                    ]
+                    predictions["pred_center"] = [
+                        [box_results[b][l].pred_boxes_3d.gravity_center for l in range(L)]
+                        for b in range(B)
+                    ]
+                    predictions["pred_size"] = [
+                        [box_results[b][l].pred_boxes_3d.dims for l in range(L)]
+                        for b in range(B)
+                    ]
 
-                # else:
-                predictions["pred_corners"] = [box_result[batch_idx].pred_boxes_3d.corners for batch_idx in range(len(box_result))]
-                predictions["pred_logits"] = [box_result[batch_idx].pred_logits for batch_idx in range(len(box_result))]
-                
-                predictions["pred_scores"] = [box_result[batch_idx].scores for batch_idx in range(len(box_result))]
-                predictions["pred_R"] = [box_result[batch_idx].pred_boxes_3d.R for batch_idx in range(len(box_result))]
-                predictions["pred_center"] = [box_result[batch_idx].pred_boxes_3d.gravity_center for batch_idx in range(len(box_result))]
-                predictions["pred_size"] = [box_result[batch_idx].pred_boxes_3d.dims for batch_idx in range(len(box_result))]
+                else:
+                    predictions["pred_corners"] = [box_result[batch_idx].pred_boxes_3d.corners for batch_idx in range(len(box_result))]
+                    predictions["pred_logits"] = [box_result[batch_idx].pred_logits for batch_idx in range(len(box_result))]
+                    
+                    predictions["pred_scores"] = [box_result[batch_idx].scores for batch_idx in range(len(box_result))]
+                    predictions["pred_R"] = [box_result[batch_idx].pred_boxes_3d.R for batch_idx in range(len(box_result))]
+                    predictions["pred_center"] = [box_result[batch_idx].pred_boxes_3d.gravity_center for batch_idx in range(len(box_result))]
+                    predictions["pred_size"] = [box_result[batch_idx].pred_boxes_3d.dims for batch_idx in range(len(box_result))]
                 
                 predictions["extrinsics"] = extrinsic
                 predictions["intrinsics"] = intrinsic

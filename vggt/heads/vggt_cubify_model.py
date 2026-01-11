@@ -180,6 +180,7 @@ class GlobalCrossAttention(nn.Module):
 
     def forward(
         self,
+        vggt_features,
         query,
         reference_2d,
         k_input_flatten,
@@ -288,6 +289,7 @@ class PreNormGlobalDecoderLayer(nn.Module):
     '''
     def forward(
         self,
+        vggt_features,
         tgt,
         query_pos,
         reference_2d,
@@ -334,6 +336,7 @@ class PreNormGlobalDecoderLayer(nn.Module):
         if self.xattn is not None:
             tgt2 = self.norm1(tgt)
             tgt2 = self.xattn(
+                vggt_features,
                 self.with_pos_embed(tgt2, query_pos),
                 reference_2d,
                 self.with_pos_embed(src, src_pos_embed),
@@ -421,7 +424,7 @@ class PromptDecoder(nn.Module):
         self.norm = norm
 
     def forward(
-        self, src, src_pos_embed, src_padding_mask, src_spatial_shapes, level_start_index, valid_ratios,
+        self, vggt_features, src, src_pos_embed, src_padding_mask, src_spatial_shapes, level_start_index, valid_ratios,
         prompts, sensor, batch, img_num):
         # Not the best assumption for now, but assume we can treat the "prompt" in a uniform manner as "reference.
         # Interleave so we have List[List[Instances]] of size # of instances x # of prompts
@@ -449,6 +452,7 @@ class PromptDecoder(nn.Module):
             # Currently, the only thing that influences the RPE is the current 2D box prediction.
             reference_2d = torch.stack([ref_.pred_boxes for ref_ in reference]).detach()
             output = layer(
+                vggt_features,
                 output,
                 prompts.pos_embed,
                 # For now, we only bias the attention based on the current 2D box. 
@@ -1189,7 +1193,48 @@ class EncoderProposals(Prompter):
         
         return result
     
-    
+    def train_single_image(self, output, image_size, topk):
+        """
+        不排序、不选 topk：保留所有 query，保持原始顺序。
+        仍然保持同样的函数签名/返回类型，topk 参数会被忽略（为了兼容接口）。
+        """
+        # 前景分数（假设二分类，前景在 logit[:,1]）
+        # 如果你的 pred_logits 不是 [Nq,2]，你需要改成取你想用的那个类别
+        class_prob = output.pred_logits.sigmoid()[:, 1]        # [Nq]
+        class_scores = class_prob                               # 不排序
+
+        # labels：保持接口字段存在
+        # 二分类时你如果只输出“前景候选”，可以全设为 1
+        labels = torch.ones_like(class_scores, dtype=torch.long)
+
+        # 不做 topk 过滤：全部保留
+        boxes = box_cxcywh_to_xyxy(output.pred_boxes)          # [Nq,4]
+        xyz = output.pred_xyz                                  # [Nq,3] or [Nq,*]
+        dims = output.pred_dims                                # [Nq,3]
+        pose = output.pred_pose                                # [Nq,*]
+        object_desc = output.object_desc                        # [Nq,C]
+        proj_xy = output.pred_proj_xy                          # [Nq,2] or [Nq,*]
+
+        result = Instances3D(image_size)
+
+        result.scores = class_scores
+        result.pred_classes = labels
+        result.pred_boxes = boxes
+        result.pred_logits = output.pred_logits
+
+        result.pred_boxes.clip_(
+            min=torch.tensor([0.0, 0.0, 0.0, 0.0], device=boxes.device),
+            max=torch.tensor([image_size[1], image_size[0], image_size[1], image_size[0]], device=boxes.device),
+        )
+
+        result.pred_boxes_3d = GeneralInstance3DBoxes(
+            torch.cat((xyz, dims[:, [2, 1, 0]]), dim=-1),
+            pose
+        )
+        result.object_desc = object_desc
+        result.pred_proj_xy = proj_xy
+
+        return result
     
     def inference(self, output, sensor, topk, intrinsic, extrinsic, gravity):
         results = []
@@ -1237,6 +1282,10 @@ class EncoderProposals(Prompter):
             if (index+1) % N_img==0:
                 # batch_output = batch_output[1]
                 batch_output = Instances3D.cat(batch_output)
+                # if self.training:
+                #     results.append(self.train_single_image(batch_output, sensor["image"].data.image_sizes[index], topk=topk))
+                # else:
+                topk = min(topk, len(batch_output))
                 results.append(self.inference_single_image(batch_output, sensor["image"].data.image_sizes[index], topk=topk))
                 batch_output=[]
 

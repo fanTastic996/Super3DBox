@@ -167,9 +167,9 @@ class Trainer:
             else:
                 ckpt_path = get_resume_checkpoint(self.checkpoint_conf.save_dir)
             if ckpt_path is not None:
-                # self._load_resuming_checkpoint(ckpt_path)
+                self._load_resuming_checkpoint(ckpt_path)
                 # self._load_resuming_checkpoint_restart(ckpt_path)
-                self._load_resuming_checkpoint_temp(ckpt_path)
+                # self._load_resuming_checkpoint_temp(ckpt_path)
 
         # Wrap the model with DDP
         self._setup_ddp_distributed_training(distributed, device)
@@ -261,21 +261,21 @@ class Trainer:
             logging.info(f"Model state loaded. Missing keys: {missing or 'None'}. Unexpected keys: {unexpected or 'None'}.")
 
         # Load optimizer state if available and in training mode
-        if "optimizer" in checkpoint:
-            logging.info(f"Loading optimizer state dict (rank {self.rank})")
-            self.optims[0].optimizer.load_state_dict(checkpoint["optimizer"])
+        # if "optimizer" in checkpoint:
+        #     logging.info(f"Loading optimizer state dict (rank {self.rank})")
+        #     self.optims[0].optimizer.load_state_dict(checkpoint["optimizer"])
 
-        # Load training progress prev_epoch
-        if "prev_epoch" in checkpoint:
-            self.epoch = checkpoint["prev_epoch"] + 1
-            logging.info(f"Loading epoch start (epoch: {self.epoch})")
+        # # Load training progress prev_epoch
+        # if "prev_epoch" in checkpoint:
+        #     self.epoch = checkpoint["prev_epoch"] + 1
+        #     logging.info(f"Loading epoch start (epoch: {self.epoch})")
             
-        self.steps = checkpoint["steps"] if "steps" in checkpoint else {"train": 0, "val": 0}
-        self.ckpt_time_elapsed = checkpoint.get("time_elapsed", 0)
+        # self.steps = checkpoint["steps"] if "steps" in checkpoint else {"train": 0, "val": 0}
+        # self.ckpt_time_elapsed = checkpoint.get("time_elapsed", 0)
 
-        # Load AMP scaler state if available
-        if self.optim_conf.amp.enabled and "scaler" in checkpoint:
-            self.scaler.load_state_dict(checkpoint["scaler"])
+        # # Load AMP scaler state if available
+        # if self.optim_conf.amp.enabled and "scaler" in checkpoint:
+        #     self.scaler.load_state_dict(checkpoint["scaler"])
 
     def _load_resuming_checkpoint_temp(self, ckpt_path):
         """Loads a checkpoint from the given path to resume training."""
@@ -363,21 +363,21 @@ class Trainer:
         # logging.info(f"Missing: {missing}, Unexpected: {unexpected}")
 
         # Load optimizer state if available and in training mode
-        if "optimizer" in checkpoint:
-            logging.info(f"Loading optimizer state dict (rank {self.rank})")
-            self.optims[0].optimizer.load_state_dict(checkpoint["optimizer"])
+        # if "optimizer" in checkpoint:
+        #     logging.info(f"Loading optimizer state dict (rank {self.rank})")
+        #     self.optims[0].optimizer.load_state_dict(checkpoint["optimizer"])
 
-        # Load training progress prev_epoch
-        if "prev_epoch" in checkpoint:
-            self.epoch = checkpoint["prev_epoch"] + 1
-            logging.info(f"Loading epoch start (epoch: {self.epoch})")
+        # # Load training progress prev_epoch
+        # if "prev_epoch" in checkpoint:
+        #     self.epoch = checkpoint["prev_epoch"] + 1
+        #     logging.info(f"Loading epoch start (epoch: {self.epoch})")
 
-        self.steps = checkpoint["steps"] if "steps" in checkpoint else {"train": 0, "val": 0}
-        self.ckpt_time_elapsed = checkpoint.get("time_elapsed", 0)
+        # self.steps = checkpoint["steps"] if "steps" in checkpoint else {"train": 0, "val": 0}
+        # self.ckpt_time_elapsed = checkpoint.get("time_elapsed", 0)
 
-        # Load AMP scaler state if available
-        if self.optim_conf.amp.enabled and "scaler" in checkpoint:
-            self.scaler.load_state_dict(checkpoint["scaler"])
+        # # Load AMP scaler state if available
+        # if self.optim_conf.amp.enabled and "scaler" in checkpoint:
+        #     self.scaler.load_state_dict(checkpoint["scaler"])
     
     
     def _load_resuming_checkpoint_mine(self, ckpt_path, cubify_path, load_cubify=True):
@@ -813,7 +813,6 @@ class Trainer:
                 self.temp_iter = data_iter
             else:
                 self.save_flag=False
-            
             # # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
             # start_run_chunks_time = time.time()
             # print("batch img shape", batch['images'].shape, data_iter)
@@ -1044,11 +1043,19 @@ class Trainer:
         for key in ['images', 'seq_name', 'ids', 'extrinsics', 'intrinsics', 'pred_corners', 'pred_logits', 'pred_scores', 'pred_R', 'pred_center', 'pred_size']:
             if key in y_hat:
                 value = y_hat[key][0]
-                # 如果value有detach方法则说明是tensor，否则直接赋值
+                # # 如果value有detach方法则说明是tensor，否则直接赋值
+                # if 'pred' not in key:
+                #     if hasattr(value, "detach"):
+                #         save_dict[key] = value.detach().cpu().numpy() # 第一个seq
+                #     else:
+                #         save_dict[key] = value
+                # else:
+                #     save_dict[key] = y_hat[key][0][-1].detach().cpu().numpy() # 第一个seq
                 if hasattr(value, "detach"):
-                    save_dict[key] = value.detach().cpu().numpy()
+                    save_dict[key] = value.detach().cpu().numpy() # 第一个seq
                 else:
                     save_dict[key] = value
+                
         
         save_dir = self.logging_conf.result_dir
         os.makedirs(save_dir, exist_ok=True)

@@ -1041,6 +1041,72 @@ def compute_box_logit_loss_single(
     
     return loss, w_box * chamfer_loss_val, w_class * class_loss, w_center * l1_loss
 
+
+# def compute_box_logit_loss_single(
+#     pred_corners,   # [N_pred, 8, 3]
+#     pred_logits,    # [N_pred, 2]
+#     gt_corners,     # [N_gt, 8, 3]
+#     pred_2d=None,
+#     gt_2d=None,
+#     w_box=1.0,
+#     w_class=1.0,
+#     w_center=1.0,
+#     match_indices=None,      # <-- 新增： (pred_idx, gt_idx)
+#     cost_kwargs=None,        # <-- 可选：外面传 cost 权重
+# ):
+#     """
+#     如果 match_indices 传入：直接用该匹配计算loss（不再重新matching）
+#     否则：内部自己构造代价矩阵 + 匈牙利匹配
+#     """
+#     device = pred_corners.device
+#     dtype  = pred_corners.dtype
+#     N_pred = pred_corners.shape[0]
+
+#     # 分类标签：0背景，1前景（float给BCE用）
+#     class_labels = torch.zeros(N_pred, device=device, dtype=pred_logits.dtype)
+
+#     chamfer_loss_val = torch.zeros((), device=device, dtype=dtype)
+#     l1_loss          = torch.zeros((), device=device, dtype=dtype)
+
+#     # ---------- matching ----------
+#     if match_indices is None:
+#         if cost_kwargs is None:
+#             cost_kwargs = dict(chamfer_weight=1.0, class_weight=1.0, giou_weight=1.0)
+#         cost_bbox = build_3d_cost_logits(pred_corners, gt_corners, pred_logits, cost_kwargs)
+#         pred_idx, gt_idx = hungarian_2d_matching(cost_bbox)
+#     else:
+#         pred_idx, gt_idx = match_indices
+
+#     # ---------- regression losses on matched pairs ----------
+#     if len(pred_idx) > 0:
+#         matched_pred = pred_corners[pred_idx]   # [M,8,3]
+#         matched_gt   = gt_corners[gt_idx]       # [M,8,3]
+
+#         chamfer_loss_val = chamfer_loss(matched_pred, matched_gt)
+
+#         center_pred = matched_pred.mean(dim=1)  # [M,3]
+#         center_gt   = matched_gt.mean(dim=1)    # [M,3]
+#         l1_loss = F.l1_loss(center_pred, center_gt, reduction="mean")
+
+#         class_labels[pred_idx] = 1.0
+
+#     # ---------- classification loss (all preds) ----------
+#     pos_logits = pred_logits[:, 1]  # foreground logit
+
+#     num_pos = class_labels.sum()
+#     # 防止全0时 pos_weight 爆炸：没有正样本就不做 reweight（或设为1）
+#     if num_pos.item() < 0.5:
+#         bce = torch.nn.BCEWithLogitsLoss()
+#         class_loss = bce(pos_logits, class_labels)
+#     else:
+#         num_neg = class_labels.numel() - num_pos
+#         pos_weight = (num_neg / num_pos).clamp(min=1.0)
+#         bce = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+#         class_loss = bce(pos_logits, class_labels)
+
+#     loss = w_box * chamfer_loss_val + w_class * class_loss + w_center * l1_loss
+#     return loss, w_box * chamfer_loss_val, w_class * class_loss, w_center * l1_loss, (pred_idx, gt_idx)
+
 def compute_box_loss(predictions, batch):
     
     total_loss = 0
@@ -1129,6 +1195,100 @@ def compute_box_logit_loss(pred_corners, pred_logits, pred_all_quad, batch):
     }
 
     return loss_dict
+
+
+# def compute_box_logit_loss(
+#     pred_corners,   # List[B][L] of Tensor
+#     pred_logits,    # List[B][L] of Tensor
+#     pred_all_quad,  # List[B][L] or List[B] or None
+#     batch,
+#     aux_weight: float = 0.3,  # 第0层权重，最后一层权重=1  建议 0.3~0.7
+# ):
+#     total_loss = 0.0
+#     total_chamfer_loss = 0.0
+#     total_class_loss = 0.0
+#     total_center_loss = 0.0
+#     total_rot_loss = 0.0
+
+#     B = len(pred_corners)
+#     seq_count = 0
+
+#     # 推断层数 L
+#     L = len(pred_corners[0]) if isinstance(pred_corners[0], (list, tuple)) else 1
+
+#     # layer 权重：从 aux_weight 线性涨到 1.0
+#     if L == 1:
+#         layer_weights = [1.0]
+#     else:
+#         layer_weights = [aux_weight + (1.0 - aux_weight) * (l / (L - 1)) for l in range(L)]
+#         layer_weights[-1] = 1.0
+#     wsum = sum(layer_weights)
+
+#     cost_kwargs = dict(chamfer_weight=1.0, class_weight=1.0, giou_weight=1.0)
+
+#     for i in range(B):
+#         gt_box_corners_seq = batch["bbox_corners"][i]  # [N_gt,8,3]
+#         gt_mask = (gt_box_corners_seq.sum(dim=[1, 2]) != 0.0)
+#         gt_box_corners = gt_box_corners_seq[gt_mask]
+#         if gt_box_corners.numel() == 0:
+#             continue
+
+#         # ---------- 1) 用最后一层做 matching（不建图） ----------
+#         # corners_last = pred_corners[i][-1].detach() #batch last layer
+#         # logits_last  = pred_logits[i][-1].detach() #batch last layer
+
+#         # 得到固定匹配
+#         # _, _, _, _, match_indices = compute_box_logit_loss_single(
+#         #     corners_last, logits_last, gt_box_corners,
+#         #     w_box=1.0, w_class=1.0, w_center=3.0,
+#         #     match_indices=None,
+#         #     cost_kwargs=cost_kwargs,
+#         # )
+
+#         # ---------- 2) 对每一层用同一个匹配算 loss ----------
+#         for l in range(L):
+#             w_l = layer_weights[l]
+
+#             corners_l = pred_corners[i][l]
+#             logits_l  = pred_logits[i][l]
+
+#             loss_l, chamfer_l, class_l, center_l, _ = compute_box_logit_loss_single(
+#                 corners_l, logits_l, gt_box_corners,
+#                 w_box=1.0, w_class=1.0, w_center=3.0,
+#                 match_indices=None, #match_indices, # <-- 复用最后一层匹配
+#                 cost_kwargs=cost_kwargs,
+#             )
+
+#             rot_l = 0.0
+#             if pred_all_quad is not None:
+#                 quad_i = pred_all_quad[i]
+#                 quad_l = quad_i[l] if isinstance(quad_i, (list, tuple)) else quad_i
+#                 gt_quad = batch["gravity"][i]
+#                 rot_l = quaternion_geodesic_loss(quad_l, gt_quad) * 0.5
+
+#             total_loss         += w_l * (loss_l + rot_l)
+#             total_chamfer_loss += w_l * chamfer_l
+#             total_class_loss   += w_l * class_l
+#             total_center_loss  += w_l * center_l
+#             total_rot_loss     += w_l * rot_l
+
+#         seq_count += 1
+
+#     if seq_count > 0:
+#         denom = seq_count * wsum
+#         total_loss         = total_loss / denom
+#         total_chamfer_loss = total_chamfer_loss / denom
+#         total_class_loss   = total_class_loss / denom
+#         total_center_loss  = total_center_loss / denom
+#         total_rot_loss     = total_rot_loss / denom
+
+#     return {
+#         "loss_box": total_loss,
+#         "loss_chamfer": total_chamfer_loss,
+#         "loss_class": total_class_loss,
+#         "loss_center": total_center_loss,
+#         "loss_rot": total_rot_loss,
+#     }
     
 ########################################################################################
 ########################################################################################
