@@ -430,10 +430,10 @@ class CubifyHead(nn.Module):
         backbone,       # 特征提取主干网络（如ViT）
         prompting,      # 提示生成机制组件
         decoder,        # 解码器（包含注意力机制和预测头）
+        fusion_module,  # 特征融合模块
         pixel_mean,     # 图像归一化均值
         pixel_std,      # 图像归一化标准差
         pos_embedding,  # 位置编码模块
-        # fusion_module,  # 特征融合模块
         # vggt_merger,  # VGGT特征合并器
         # frame_merger, # 帧特征合并器
         sensor_name="wide", # 使用的传感器类型
@@ -446,7 +446,7 @@ class CubifyHead(nn.Module):
         self.decoder = decoder
         self.pos_embedding = pos_embedding
         #added
-        # self.fusion_module = fusion_module  # 特征融合模块
+        self.fusion_module = fusion_module  # 特征融合模块
         # self.vggt_merger = vggt_merger  # VGGT特征合并器
         # self.frame_merger = frame_merger  # 帧特征合并器
         # 注册图像归一化参数（自动跟随模型设备移动）
@@ -551,6 +551,7 @@ class CubifyHead(nn.Module):
     def inference(
         self,
         vggt_images,  # 批处理的传感器数据字典 # vggt images: ([4(B), 3(N), 3, 476, 518])
+        HW_patch,
         aggregated_tokens_list, #N个[266, 2048]的list
         patch_start_idx,
         intrinsic=None,
@@ -639,11 +640,11 @@ class CubifyHead(nn.Module):
         # 特征融合
         #extract VGGT增强的3D视觉特征
         # vggt_features = self.extract_image_vggt_embeds_3d_direct(aggregated_tokens_list[-2],patch_start_idx,img_H,img_W)  # [batch_size, num_frames, C, H, W]
+        # TODO: maybe can use multi-level vggt features?
         vggt_features = aggregated_tokens_list[-1][:, :, patch_start_idx:, :]
 
-        # vggt_features = vggt_features.view(src_flatten.shape[0],-1,vggt_features.shape[-1])  
         
-        # multiframe_fused_features = self.fusion_module(src_flatten, vggt_features, mask_flatten)
+        # fused_features = self.fusion_module(src_flatten, vggt_features.reshape(N_batch * N_img, vggt_features.shape[-2], vggt_features.shape[-1]), mask_flatten, vggt_hw=(HW_patch[0], HW_patch[1]))
         
         fused_features = src_flatten # single frame
         # fused_features = multiframe_fused_features #.reshape(1, -1, 256)  #[1, N*single_img_token, 256]
@@ -677,7 +678,7 @@ class CubifyHead(nn.Module):
         _, intermediate_preds = self.decoder(
             vggt_features,
             fused_features, lvl_pos_embed, mask_flatten, spatial_shapes, 
-            level_start_index, valid_ratios, prompts, sensor, N_batch, N_img
+            level_start_index, valid_ratios, prompts, sensor, N_batch, N_img, HW_patch
         )
         
         # 6. 处理最后层输出
@@ -879,12 +880,12 @@ class CubifyHead(nn.Module):
         return all_results
 
 
-    def forward(self, batched_inputs, aggregated_tokens_list, patch_start_idx, intrinsic=None, extrinsic=None, gravity=None, do_postprocess=True, training=True):
+    def forward(self, batched_inputs, HW_patch, aggregated_tokens_list, patch_start_idx, intrinsic=None, extrinsic=None, gravity=None, do_postprocess=True, training=True):
         """训练/推理的统一入口（实际调用推理函数）"""
         if training:
             return self.train_step(batched_inputs, aggregated_tokens_list, patch_start_idx, intrinsic=intrinsic, extrinsic=extrinsic, gravity=gravity)
         else:
-            return self.inference(batched_inputs, aggregated_tokens_list, patch_start_idx, intrinsic=intrinsic, extrinsic=extrinsic, gravity=gravity)
+            return self.inference(batched_inputs, HW_patch, aggregated_tokens_list, patch_start_idx, intrinsic=intrinsic, extrinsic=extrinsic, gravity=gravity)
 
     def extract_image_vggt_embeds_3d(
         self,

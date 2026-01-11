@@ -17,27 +17,27 @@ dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.
 
 model = VGGT(enable_camera=True, enable_gravity=True, enable_point=False, enable_depth=False, enable_track=False, enable_cubify=True)
 # model = VGGT(enable_camera=True, enable_gravity=False, enable_point=False, enable_depth=False, enable_track=False, enable_cubify=True)
-# _URL = "/data1/lyq/logs/exp001/ckpts/checkpoint.pt"
+# _URL = "/data1/lyq/logs/exp001/ckpts/checkpoint_bak.pt"
 _URL = "/data1/lyq/logs/exp001/ckpts/checkpoint_backup.pt"
 # _URL = "/home/lanyuqing/myproject/vggt/training/logs/exp001/ckpts/checkpoint_45444750_180_200_gravity_query.pt"
 model_dict= torch.load(_URL)
-model.load_state_dict(model_dict["model"])
+model.load_state_dict(model_dict["model"]) 
 
 
 model.eval()
 model.to(device)
 
 data_root = '/data1/lyq/CA1M-dataset/CA1M-dataset/training'
-# scene_id = '42444750'
-scene_id = '47332992' #'47332808'
+scene_id = '42444750'
+# scene_id = '43896247' #'47332808'
 # Load and preprocess example images (replace with your own image paths) 
 # scene_id = '47334115'
 # image_names = [f"{data_root}/{scene_id}/rgb/4.png", f"{data_root}/{scene_id}/rgb/14.png", f"{data_root}/{scene_id}/rgb/24.png"]  
 
-image_names = [f"{data_root}/{scene_id}/rgb/313.png", f"{data_root}/{scene_id}/rgb/323.png", f"{data_root}/{scene_id}/rgb/333.png", f"{data_root}/{scene_id}/rgb/343.png"]
+# image_names = [f"{data_root}/{scene_id}/rgb/277.png", f"{data_root}/{scene_id}/rgb/287.png"]
 # image_names = [f"{data_root}/{scene_id}/rgb/520.png"]
 # image_names = [f"{data_root}/{scene_id}/rgb/50.png", f"{data_root}/{scene_id}/rgb/70.png"]
-# image_names = [f"{data_root}/{scene_id}/rgb/180.png", f"{data_root}/{scene_id}/rgb/200.png"]
+image_names = [f"{data_root}/{scene_id}/rgb/180.png", f"{data_root}/{scene_id}/rgb/200.png"]
 
 # image_names = ['/data1/lyq/4.jpg', '/data1/lyq/14.jpg', '/data1/lyq/24.jpg']
 

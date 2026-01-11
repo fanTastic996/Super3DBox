@@ -21,8 +21,9 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
     def __init__(self, img_size=518, patch_size=14, embed_dim=1024,
                  enable_camera=True, enable_gravity=True, enable_point=True, enable_depth=True, enable_track=True, enable_cubify=True):
         super().__init__()
-
+        self.patch_size = patch_size
         self.aggregator = Aggregator(img_size=img_size, patch_size=patch_size, embed_dim=embed_dim)
+        
 
         self.camera_head = CameraHead(dim_in=2 * embed_dim) if enable_camera else None
         self.gravity_head = GravityHead(dim_in=2 * embed_dim) if enable_gravity else None
@@ -147,6 +148,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
             #         ),
             # frame_merger=AttentionFusionWithTorch(embed_dim=256, num_heads=8),
             # frame_merger=LightweightCrossViewFusion(feat_dim=256),
+            fusion_module=None,#DeformableSrcFuseVggt(d_src=cubify_embed_dim, d_vggt=2048),
             pixel_mean=[123.675, 116.28, 103.53],
             pixel_std=[58.395, 57.12, 57.375],
             topk_per_image=200) if enable_cubify else None
@@ -180,7 +182,8 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
         # If without batch dimension, add it
         if len(images.shape) == 4:
             images = images.unsqueeze(0)
-            
+        H_img, W_img = images.shape[-2:]
+        H_patch, W_patch = H_img // self.patch_size, W_img // self.patch_size
         if query_points is not None and len(query_points.shape) == 2:
             query_points = query_points.unsqueeze(0)
         aggregated_tokens_list, patch_start_idx = self.aggregator(images)
@@ -235,6 +238,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                 # else:
                 box_result = self.box_head(
                     images,
+                    (H_patch, W_patch),
                     aggregated_tokens_list,
                     patch_start_idx,
                     intrinsic=intrinsic,
