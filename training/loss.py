@@ -81,8 +81,9 @@ class MultitaskLoss(torch.nn.Module):
             pred_corners = predictions['pred_corners']
             pred_logits = predictions['pred_logits']
             pred_all_quad = predictions['gravity_enc']
+            pred_boxes = predictions['pred_boxes']
             # box_loss_dict = compute_box_loss(box_predictions, batch)#, **self.box)   
-            box_loss_dict = compute_box_logit_loss(pred_corners, pred_logits, pred_all_quad, batch)#, **self.box)   
+            box_loss_dict = compute_box_logit_loss(pred_corners, pred_logits, pred_boxes, pred_all_quad, batch)#, **self.box)   
             box_loss = box_loss_dict["loss_box"] * self.box["weight"]   
             total_loss = total_loss + box_loss
             loss_dict.update(box_loss_dict)
@@ -885,6 +886,51 @@ def pairwise_giou_3d_from_corners(pred_corners: torch.Tensor,
     return giou
 
 
+# ===== 配对好的 per-box GIoU：pred/gt 都是 [N,8,3]，返回平均 GIoU =====
+def mean_giou_3d_from_paired_corners(pred_corners: torch.Tensor,
+                                    gt_corners: torch.Tensor,
+                                    eps: float = None) -> torch.Tensor:
+    """
+    pred_corners: [N, 8, 3]
+    gt_corners  : [N, 8, 3]
+    return:
+      mean_giou: scalar tensor
+      (可选：你也可以把 giou_per_box 返回出去，见下方注释)
+    """
+    assert pred_corners.ndim == 3 and pred_corners.shape[1:] == (8, 3)
+    assert gt_corners.ndim == 3 and gt_corners.shape[1:] == (8, 3)
+    assert pred_corners.shape[0] == gt_corners.shape[0], "pred/gt must have same N"
+
+    if eps is None:
+        eps = torch.finfo(pred_corners.dtype).eps if pred_corners.is_floating_point() else 1e-12
+
+    # AABB
+    p_mins, p_maxs = corners_to_aabb(pred_corners)  # [N,3]
+    g_mins, g_maxs = corners_to_aabb(gt_corners)    # [N,3]
+
+    # volumes
+    vol_p = aabb_volume(p_mins, p_maxs)             # [N]
+    vol_g = aabb_volume(g_mins, g_maxs)             # [N]
+
+    # intersection per pair (aligned, no [N,M] broadcasting)
+    inter_mins = torch.maximum(p_mins, g_mins)      # [N,3]
+    inter_maxs = torch.minimum(p_maxs, g_maxs)      # [N,3]
+    inter = aabb_volume(inter_mins, inter_maxs)     # [N]
+
+    # union
+    union = vol_p + vol_g - inter                   # [N]
+
+    # iou
+    iou = inter / (union + eps)                     # [N]
+
+    # enclosing box C per pair
+    c_mins = torch.minimum(p_mins, g_mins)          # [N,3]
+    c_maxs = torch.maximum(p_maxs, g_maxs)          # [N,3]
+    vol_c = aabb_volume(c_mins, c_maxs).clamp(min=eps)  # [N]
+
+    giou_per_box = iou - (vol_c - union) / vol_c    # [N]
+    return giou_per_box.mean()
+
 # ---------- 1) 构造 3D Chamfer 和 logits 的代价矩阵 (vectorized) ----------
 def build_3d_cost_logits(pred_corners, gt_corners, pred_logits, cost_kwargs):
     """
@@ -965,6 +1011,87 @@ def compute_box_loss_single(
     return loss
 
 
+@torch.no_grad()
+def _make_binary_labels(num_queries: int, matched_query_idx: torch.Tensor, device):
+    """
+    num_queries: N
+    matched_query_idx: [num_pos]  (匈牙利匹配到GT的 query 索引)
+    """
+    y = torch.zeros((num_queries,), device=device, dtype=torch.float32)
+    if matched_query_idx.numel() > 0:
+        y[matched_query_idx.long()] = 1.0
+    return y
+
+def objectness_bce_balanced_hardneg(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    r_hard: float = 5.0,          # 每个正样本挑 r_hard 个 hardest negative
+    hard_mult: float = 5.0,        # hardest negative 的额外权重倍数
+    neg_w_max: float = 0.2,        # 基础负样本权重上限（建议 0.1~0.3）
+    neg_w_min: float = 0.0,        # 基础负样本权重下限
+    hard_by: str = "logit",        # "logit" 或 "loss"
+    eps: float = 1e-6,
+):
+    """
+    logits:  [...], raw logits（不要先sigmoid）
+    targets: [...], 0/1 float
+    返回：loss, stats(dict) 方便你打 log
+    """
+    # flatten
+    logits_f = logits.reshape(-1).float()
+    targets_f = targets.reshape(-1).float()
+
+    # per-query BCE (no reduction)
+    per_loss = F.binary_cross_entropy_with_logits(logits_f, targets_f, reduction="none")
+
+    pos = targets_f > 0.5
+    neg = ~pos
+    num_pos = pos.sum().float()
+    num_neg = neg.sum().float()
+
+    # 基础权重：让“全部负样本总权重 ≈ 全部正样本总权重”
+    # w_neg = num_pos / num_neg （会很小，比如 30/1000=0.03）
+    if num_neg > 0:
+        w_neg = (num_pos / (num_neg + eps)).clamp(min=neg_w_min, max=neg_w_max)
+    else:
+        w_neg = torch.tensor(0.0, device=logits_f.device)
+
+    weights = torch.ones_like(targets_f)
+    weights[neg] = w_neg
+
+    # Hard negative mining：从负样本里挑最难的那一部分加重
+    if num_neg > 0:
+        if num_pos > 0:
+            k = int(min((r_hard * num_pos).item(), num_neg.item()))
+        else:
+            # 场景里没有GT：只挑一小撮最高分负样本，避免全负导致训练发散/过强
+            k = int(min(200, num_neg.item()))
+
+        if k > 0:
+            if hard_by == "loss":
+                score = per_loss[neg]
+            elif hard_by == "logit":
+                score = logits_f[neg]  # logit 越大越“像正样本”
+            else:
+                raise ValueError(f"hard_by must be 'logit' or 'loss', got {hard_by}")
+
+            hard_idx_in_neg = torch.topk(score, k=k, largest=True).indices
+            neg_idx = neg.nonzero(as_tuple=False).squeeze(1)
+            hard_idx = neg_idx[hard_idx_in_neg]
+            weights[hard_idx] = weights[hard_idx] * hard_mult
+
+    # 加权归一化（按权重和归一化更稳）
+    loss = (per_loss * weights).sum() / (weights.sum() + eps)
+
+    stats = {
+        "num_pos": float(num_pos.item()),
+        "num_neg": float(num_neg.item()),
+        "w_neg": float(w_neg.item()) if num_neg > 0 else 0.0,
+        "hard_k": float((r_hard * num_pos).item()) if num_pos > 0 else 0.0,
+    }
+    return loss, stats
+
+
 # ---------- 总接口 ----------
 def compute_box_logit_loss_single(
     pred_corners,   # [N_pred, 8, 3]
@@ -974,7 +1101,8 @@ def compute_box_logit_loss_single(
     gt_2d=None,          # [N_gt, 4]
     w_box = 1.0, # Chamfer loss weight
     w_class = 1.0, # Classification loss weight
-    w_center = 1.0 # center L1 loss for box_corners
+    w_center = 1.0, # center L1 loss for box_corners
+    w_giou = 1.0 # GIoU loss weight
     ):
     """
     1. 用 3D Chamfer 和 logits 做匈牙利匹配
@@ -1014,6 +1142,13 @@ def compute_box_logit_loss_single(
         
         # 4) 将匹配上的预测框标记为前景(0)
         class_labels[pred_idx] = 1.0
+        
+        #GIoU Loss
+        # giou = mean_giou_3d_from_paired_corners(matched_pred, matched_gt)
+        # giou_loss = -giou
+        
+        
+        
 
     # 5) 分类损失：对所有预测框计算交叉熵损失
     # class_loss = F.cross_entropy(pred_logits, class_labels)
@@ -1029,17 +1164,25 @@ def compute_box_logit_loss_single(
     # 现在 class_labels_one_hot 的形状是 [100, 2]
     # 然后计算损失
     pos_logits = pred_logits[:, 1]  # [100]
-    num_pos = class_labels.sum().clamp(min=1)
-    num_neg = (class_labels.numel() - num_pos)
-    pos_weight = num_neg / num_pos 
-    bce = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-    class_loss = bce(pos_logits, class_labels)
+    # num_pos = class_labels.sum().clamp(min=1)
+    # num_neg = (class_labels.numel() - num_pos)
+    # pos_weight = num_neg / num_pos 
+    # bce = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    # class_loss = bce(pos_logits, class_labels)
+    
+    class_loss, cls_stats = objectness_bce_balanced_hardneg(
+        pos_logits, class_labels,
+        r_hard=5.0,
+        hard_mult=5.0,
+        neg_w_max=0.2,
+        hard_by="logit",     # 推荐先用 logit
+    )
         
     
     # 6) 总损失
-    loss = w_box * chamfer_loss_val + w_class * class_loss + w_center * l1_loss
+    loss = w_box * chamfer_loss_val + w_class * class_loss + w_center * l1_loss #+ w_giou * giou_loss
     
-    return loss, w_box * chamfer_loss_val, w_class * class_loss, w_center * l1_loss
+    return loss, w_box * chamfer_loss_val, w_class * class_loss, w_center * l1_loss #, w_giou * giou_loss
 
 
 # def compute_box_logit_loss_single(
@@ -1137,13 +1280,259 @@ def compute_box_loss(predictions, batch):
     return loss_dict
 
 
-def compute_box_logit_loss(pred_corners, pred_logits, pred_all_quad, batch):
+
+def pairwise_iou_xyxy(boxes_xyxy: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
+    """
+    boxes_xyxy: [N,4] in (x1, y1, x2, y2)
+    returns:    [N,N] pairwise IoU matrix
+    """
+    assert boxes_xyxy.ndim == 2 and boxes_xyxy.size(-1) == 4
+
+    x1, y1, x2, y2 = boxes_xyxy.unbind(dim=-1)  # each [N]
+
+    # ensure valid boxes
+    w = (x2 - x1).clamp(min=0.0)
+    h = (y2 - y1).clamp(min=0.0)
+    area = w * h  # [N]
+
+    # pairwise intersections
+    inter_x1 = torch.maximum(x1[:, None], x1[None, :])
+    inter_y1 = torch.maximum(y1[:, None], y1[None, :])
+    inter_x2 = torch.minimum(x2[:, None], x2[None, :])
+    inter_y2 = torch.minimum(y2[:, None], y2[None, :])
+
+    inter_w = (inter_x2 - inter_x1).clamp(min=0.0)
+    inter_h = (inter_y2 - inter_y1).clamp(min=0.0)
+    inter = inter_w * inter_h  # [N,N]
+
+    union = area[:, None] + area[None, :] - inter
+    iou = inter / (union + eps)
+    return iou
+
+
+def duplicate_iou_regularizer_2d_xyxy(
+    boxes_xyxy: torch.Tensor,             # [N,4] (x1,y1,x2,y2)
+    scores: torch.Tensor,                 # [N] (e.g., sigmoid(objectness))
+    iou_thr: float = 0.7,                 # IoU threshold
+    score_thr: float = 0.7,               # score threshold (both boxes in a pair must exceed this)
+    topk: int | None = None,              # optional: only consider top-k by score first
+    power: float = 2.0,                   # penalty: (iou - iou_thr)^power
+    reduction: str = "mean",              # "mean" or "sum"
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """
+    Differentiable duplicate-box regularizer.
+    Only penalizes pairs (i,j) where:
+      - IoU(i,j) > iou_thr
+      - score_i >= score_thr AND score_j >= score_thr
+
+    Returns: scalar tensor (loss).
+    """
+    assert boxes_xyxy.ndim == 2 and boxes_xyxy.size(-1) == 4
+    assert scores is not None, "scores must be provided for score gating."
+    assert scores.ndim == 1 and scores.numel() == boxes_xyxy.size(0)
+
+    N = boxes_xyxy.size(0)
+    if N <= 1:
+        return boxes_xyxy.new_zeros(())
+
+    boxes = boxes_xyxy
+    sc = scores
+    #TODO: test
+    # print('1', boxes_xyxy[0]+20)
+    # print('0', boxes_xyxy[0])
+    # boxes_xyxy[1] = boxes_xyxy[0]+20
+    # Keep only boxes whose score >= score_thr (hard gating)
+    keep = sc >= float(score_thr)
+    if keep.sum().item() <= 1:
+        return boxes_xyxy.new_zeros(())
+
+    boxes = boxes[keep]
+    sc = sc[keep]  # not strictly needed further, but kept for clarity
+
+    # Pairwise IoU
+    iou = pairwise_iou_xyxy(boxes.to(dtype=torch.float32), eps=eps)  # [M,M]
+    M = iou.size(0)
+    if M <= 1:
+        return boxes_xyxy.new_zeros(())
+
+    # Upper triangle (exclude diagonal)
+    tri_mask = torch.triu(torch.ones((M, M), device=iou.device, dtype=torch.bool), diagonal=1)
+
+    # Only consider IoU above threshold
+    over = (iou > float(iou_thr)) & tri_mask
+    # print('iou', iou)
+    # print('over', over)
+    if not torch.any(over):
+        return boxes_xyxy.new_zeros(())
+
+    penalty = (iou - float(iou_thr)).clamp(min=0.0)
+
+    if power != 1.0:
+        penalty = penalty.pow(float(power))
+
+    vals = penalty[over]
+
+    if reduction == "sum":
+        return vals.sum()
+    elif reduction == "mean":
+        return vals.mean()
+    else:
+        raise ValueError(f"Unknown reduction={reduction}")
+
+
+
+def corners_to_aabb_xyzxyz(corners: torch.Tensor) -> torch.Tensor:
+    """
+    corners: [N,8,3]
+    returns: [N,6] as (x1,y1,z1,x2,y2,z2)
+    """
+    assert corners.ndim == 3 and corners.shape[-2:] == (8, 3)
+    mn = corners.amin(dim=1)  # [N,3]
+    mx = corners.amax(dim=1)  # [N,3]
+    return torch.cat([mn, mx], dim=-1)
+
+def center_lwh_to_aabb_xyzxyz(center: torch.Tensor, lwh: torch.Tensor) -> torch.Tensor:
+    """
+    center: [N,3]
+    lwh:    [N,3] (length/width/height or dx/dy/dz) — here treated as full size
+    returns:[N,6] (x1,y1,z1,x2,y2,z2)
+    """
+    assert center.ndim == 2 and center.size(-1) == 3
+    assert lwh.ndim == 2 and lwh.size(-1) == 3
+    half = 0.5 * lwh.clamp(min=0.0)
+    mn = center - half
+    mx = center + half
+    return torch.cat([mn, mx], dim=-1)
+
+def pairwise_iou_3d_aabb(aabb: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
+    """
+    aabb: [N,6] (x1,y1,z1,x2,y2,z2)
+    returns: [N,N] IoU matrix
+    """
+    assert aabb.ndim == 2 and aabb.size(-1) == 6
+    x1, y1, z1, x2, y2, z2 = aabb.unbind(dim=-1)
+
+    dx = (x2 - x1).clamp(min=0.0)
+    dy = (y2 - y1).clamp(min=0.0)
+    dz = (z2 - z1).clamp(min=0.0)
+    vol = dx * dy * dz  # [N]
+
+    ix1 = torch.maximum(x1[:, None], x1[None, :])
+    iy1 = torch.maximum(y1[:, None], y1[None, :])
+    iz1 = torch.maximum(z1[:, None], z1[None, :])
+
+    ix2 = torch.minimum(x2[:, None], x2[None, :])
+    iy2 = torch.minimum(y2[:, None], y2[None, :])
+    iz2 = torch.minimum(z2[:, None], z2[None, :])
+
+    idx = (ix2 - ix1).clamp(min=0.0)
+    idy = (iy2 - iy1).clamp(min=0.0)
+    idz = (iz2 - iz1).clamp(min=0.0)
+    inter = idx * idy * idz  # [N,N]
+
+    union = vol[:, None] + vol[None, :] - inter
+    iou = inter / (union + eps)
+    return iou
+
+def duplicate_regularizer_3d_aabb(
+    *,
+    corners: torch.Tensor | None = None,      # [N,8,3]
+    centers: torch.Tensor | None = None,      # [N,3]
+    lwh: torch.Tensor | None = None,          # [N,3]
+    scores: torch.Tensor,                    # [N] (建议用 sigmoid 后概率)
+    iou_thr: float = 0.7,
+    score_thr: float = 0.7,
+    topk: int | None = 400,                  # 防 O(N^2) 太大
+    power: float = 1.0,                      # 建议先用 1.0；2.0 会弱化“刚过阈值”的惩罚
+    normalize_margin: bool = True,           # 用 (iou-t)/(1-t) 归一化，尺度更稳
+    score_power: float = 1.0,                # 权重乘 (s_i*s_j)^score_power
+    reduction: str = "mean",                 # "mean" or "sum"
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """
+    Penalize duplicate 3D boxes (AABB IoU) among HIGH-score predictions only.
+    Only pairs (i<j) with:
+      - scores[i] >= score_thr and scores[j] >= score_thr
+      - IoU(i,j) > iou_thr
+    contribute to the loss.
+
+    Returns: scalar tensor.
+    """
+    assert scores is not None and scores.ndim == 1
+    N = scores.numel()
+    if N <= 1:
+        return scores.new_zeros(())
+
+    device = scores.device
+
+    # 1) build AABB
+    if corners is not None:
+        aabb = corners_to_aabb_xyzxyz(corners)
+    else:
+        if centers is None or lwh is None:
+            raise ValueError("Provide either corners, or (centers and lwh).")
+        aabb = center_lwh_to_aabb_xyzxyz(centers, lwh)
+
+    aabb = aabb.to(dtype=torch.float32)
+    sc = scores.to(dtype=torch.float32)
+
+    # 2) optional topk by score (reduces O(N^2))
+    # if topk is not None and N > int(topk):
+    #     idx = torch.topk(sc, k=int(topk), largest=True).indices
+    #     aabb = aabb[idx]
+    #     sc = sc[idx]
+
+    # 3) score gate: only keep boxes with score >= score_thr
+    keep = sc >= float(score_thr)
+    if keep.sum().item() <= 1:
+        return scores.new_zeros(())
+
+    aabb = aabb[keep]
+    sc = sc[keep].clamp(min=0.0)
+    M = aabb.size(0)
+    if M <= 1:
+        return scores.new_zeros(())
+
+    # 4) pairwise IoU on AABB
+    iou = pairwise_iou_3d_aabb(aabb, eps=eps)  # [M,M]
+
+    # 5) only upper triangle (avoid double counting + diagonal)
+    tri = torch.triu(torch.ones((M, M), device=device, dtype=torch.bool), diagonal=1)
+
+    mask = tri & (iou > float(iou_thr))
+    if not torch.any(mask):
+        return scores.new_zeros(())
+
+    # 6) penalty shape
+    if normalize_margin:
+        pen = ((iou - float(iou_thr)) / (1.0 - float(iou_thr) + eps)).clamp(min=0.0)
+    else:
+        pen = (iou - float(iou_thr)).clamp(min=0.0)
+
+    if power != 1.0:
+        pen = pen.pow(float(power))
+
+    # 7) score weighting (focus on confident duplicates)
+    w = (sc[:, None] * sc[None, :]).pow(float(score_power))
+    vals = (pen * w)[mask]
+
+    if reduction == "sum":
+        return vals.sum()
+    elif reduction == "mean":
+        return vals.mean()
+    else:
+        raise ValueError(f"Unknown reduction={reduction}")
+
+def compute_box_logit_loss(pred_corners, pred_logits, pred_boxes, pred_all_quad, batch):
     
     total_loss = 0
     total_chamfer_loss = 0
     total_class_loss = 0
     total_center_loss = 0
     total_rot_loss = 0
+    # total_giou_loss = 0
+    total_reg_loss = 0
     N_seq = len(pred_corners)
     seq_count = 0
     # calcudate loss for each sequence
@@ -1152,6 +1541,35 @@ def compute_box_logit_loss(pred_corners, pred_logits, pred_all_quad, batch):
         pred_box_corners = pred_corners[i]
         pred_box_logits = pred_logits[i]
         N_imgs = len(pred_box_corners)
+        
+        # 2D regularization loss
+        pred_box_boxes = pred_boxes[i]
+        pred_scores = pred_box_logits.sigmoid()[:, 1]
+        N_imgs = len(pred_box_corners)
+        loss_reg_2d_single = 0
+        single_reg_loss = 0
+        for start_idx in range(0, N_imgs, 100):
+            end_idx = min(start_idx + 100, N_imgs)
+            loss_reg_2d = duplicate_iou_regularizer_2d_xyxy(
+                pred_box_boxes[start_idx:end_idx], scores=pred_scores[start_idx:end_idx],
+                iou_thr=0.3, score_thr=0.6, power=2.0, reduction="mean"
+            )
+            loss_reg_2d_single += loss_reg_2d
+        loss_reg_2d_single /= (N_imgs/100) 
+        loss_reg_3d = duplicate_regularizer_3d_aabb(
+            corners=pred_box_corners,   # [N,8,3] (推荐)
+            scores=pred_scores,          # [N]
+            iou_thr=0.5,
+            score_thr=0.7,
+            topk=400,
+            power=1.0,
+            normalize_margin=True,
+            score_power=1.0,
+        )
+        single_reg_loss = loss_reg_2d_single * 10.0 + loss_reg_3d
+        single_reg_loss *= 0.1
+        
+        
 
         gt_box_corners_seq = batch['bbox_corners'][i] # [N_gt, 8 ,3]
         gt_box_corners_seq_sum = gt_box_corners_seq.sum(dim=[1, 2]) #[500]
@@ -1163,7 +1581,7 @@ def compute_box_logit_loss(pred_corners, pred_logits, pred_all_quad, batch):
         if len(gt_box_corners)==0:
             continue
         
-        loss, chamfer_loss_val, class_loss, center_loss = compute_box_logit_loss_single(pred_box_corners, pred_box_logits, gt_box_corners, w_box=1.0, w_class=1.0, w_center=3.0) #w_class=0.05
+        loss, chamfer_loss_val, class_loss, center_loss = compute_box_logit_loss_single(pred_box_corners, pred_box_logits, gt_box_corners, w_box=1.0, w_class=1.0, w_center=3.0, w_giou=1.0) #w_class=0.05
         # loss = chamfer_loss(pred_box_corners, gt_box_corners) 
         
         pred_quad = pred_all_quad[i]
@@ -1174,8 +1592,11 @@ def compute_box_logit_loss(pred_corners, pred_logits, pred_all_quad, batch):
         total_chamfer_loss += chamfer_loss_val
         total_class_loss += class_loss
         total_center_loss += center_loss
+        # total_giou_loss += giou_loss
         total_rot_loss += rot_loss
+        total_reg_loss += single_reg_loss
         total_loss += rot_loss
+        total_loss += single_reg_loss
         # total_loss = rot_loss
         seq_count+=1
     
@@ -1185,13 +1606,16 @@ def compute_box_logit_loss(pred_corners, pred_logits, pred_all_quad, batch):
         total_class_loss = total_class_loss / seq_count
         total_center_loss = total_center_loss / seq_count
         total_rot_loss = total_rot_loss / seq_count
-        
+        total_reg_loss = total_reg_loss / seq_count
+        # total_giou_loss = total_giou_loss / seq_count
     loss_dict = {
         f"loss_box": total_loss,
         f"loss_chamfer": total_chamfer_loss,
         f"loss_class": total_class_loss,
         f"loss_center": total_center_loss,
         f"loss_rot": total_rot_loss,
+        f"loss_reg": total_reg_loss,
+        # f"loss_giou": total_giou_loss,
     }
 
     return loss_dict

@@ -261,21 +261,21 @@ class Trainer:
             logging.info(f"Model state loaded. Missing keys: {missing or 'None'}. Unexpected keys: {unexpected or 'None'}.")
 
         # Load optimizer state if available and in training mode
-        # if "optimizer" in checkpoint:
-        #     logging.info(f"Loading optimizer state dict (rank {self.rank})")
-        #     self.optims[0].optimizer.load_state_dict(checkpoint["optimizer"])
+        if "optimizer" in checkpoint:
+            logging.info(f"Loading optimizer state dict (rank {self.rank})")
+            self.optims[0].optimizer.load_state_dict(checkpoint["optimizer"])
 
-        # # Load training progress prev_epoch
-        # if "prev_epoch" in checkpoint:
-        #     self.epoch = checkpoint["prev_epoch"] + 1
-        #     logging.info(f"Loading epoch start (epoch: {self.epoch})")
+        # Load training progress prev_epoch
+        if "prev_epoch" in checkpoint:
+            self.epoch = checkpoint["prev_epoch"] + 1
+            logging.info(f"Loading epoch start (epoch: {self.epoch})")
             
-        # self.steps = checkpoint["steps"] if "steps" in checkpoint else {"train": 0, "val": 0}
-        # self.ckpt_time_elapsed = checkpoint.get("time_elapsed", 0)
+        self.steps = checkpoint["steps"] if "steps" in checkpoint else {"train": 0, "val": 0}
+        self.ckpt_time_elapsed = checkpoint.get("time_elapsed", 0)
 
-        # # Load AMP scaler state if available
-        # if self.optim_conf.amp.enabled and "scaler" in checkpoint:
-        #     self.scaler.load_state_dict(checkpoint["scaler"])
+        # Load AMP scaler state if available
+        if self.optim_conf.amp.enabled and "scaler" in checkpoint:
+            self.scaler.load_state_dict(checkpoint["scaler"])
 
     def _load_resuming_checkpoint_temp(self, ckpt_path):
         """Loads a checkpoint from the given path to resume training."""

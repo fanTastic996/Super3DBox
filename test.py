@@ -395,12 +395,12 @@ import os
 #     print(seq)
 
 
-seqs = os.listdir('/data1/lyq/CA1M_train_slam')
-seqs = sorted([seq for seq in seqs if not seq.endswith('.txt')])
+# seqs = os.listdir('/data1/lyq/CA1M_train_slam')
+# seqs = sorted([seq for seq in seqs if not seq.endswith('.txt')])
 
-with open('/data1/lyq/CA1M_train_slam/train_list.txt', 'w') as f:
-    for seq in seqs:
-        f.write(seq + '\n')
+# with open('/data1/lyq/CA1M_train_slam/train_list.txt', 'w') as f:
+#     for seq in seqs:
+#         f.write(seq + '\n')
 
 # final_not = []
 # depth_num = []
@@ -420,3 +420,79 @@ with open('/data1/lyq/CA1M_train_slam/train_list.txt', 'w') as f:
 #     if seq  not in list_117:
 #         print(seq)
         
+        
+        
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+# import os
+# import pickle
+# import argparse
+
+# def main():
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument(
+#         "--in_dir",
+#         default="/data1/lyq/CA1M_results",
+#         help="Input directory (first-level contains pkl files)"
+#     )
+#     parser.add_argument(
+#         "--out_dir",
+#         required=True,
+#         help="Output directory for slim pkl files"
+#     )
+#     args = parser.parse_args()
+
+#     os.makedirs(args.out_dir, exist_ok=True)
+
+#     pkl_files = sorted(
+#         f for f in os.listdir(args.in_dir) if f.endswith(".pkl")
+#     )
+#     print(f"[INFO] Found {len(pkl_files)} pkl files")
+
+#     n_ok, n_skip, n_err = 0, 0, 0
+
+#     for fname in pkl_files:
+#         in_path = os.path.join(args.in_dir, fname)
+#         stem = fname
+#         out_path = os.path.join(args.out_dir, stem)
+
+#         try:
+#             with open(in_path, "rb") as f:
+#                 save_dict = pickle.load(f)
+
+#             if "box_result" not in save_dict:
+#                 print(f"[SKIP] {fname}: missing 'box_result'")
+#                 n_skip += 1
+#                 continue
+
+#             br = save_dict["box_result"]
+#             if "scores" not in br or "corners" not in br:
+#                 print(f"[SKIP] {fname}: missing 'scores' or 'corners'")
+#                 n_skip += 1
+#                 continue
+
+#             # 新的精简结构（推荐这种清晰结构）
+#             slim_dict = {
+#                 "box_result": {
+#                     "scores": br["scores"],
+#                     "corners": br["corners"],
+#                 }
+#             }
+
+#             with open(out_path, "wb") as f:
+#                 pickle.dump(slim_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+#             print(f"[OK] {fname} -> {out_path}")
+#             n_ok += 1
+
+#         except Exception as e:
+#             print(f"[ERR] {fname}: {type(e).__name__}: {e}")
+#             n_err += 1
+
+#     print(f"[DONE] ok={n_ok}, skip={n_skip}, err={n_err}")
+
+# if __name__ == "__main__":
+#     main()
+
+

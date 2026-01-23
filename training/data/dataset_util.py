@@ -891,6 +891,26 @@ def _merge_world_corners_from_points(world_points: np.ndarray, force_w_ge_h: boo
     return np.vstack([bottom, top])  # (8,3)
 
 
+def classify_shape(scale,
+                   long_ratio=8.0,
+                   flat_ratio=8.0,
+                   round_ratio=1.8,
+                   plane_ratio=2.5):
+    s0, s1, s2 = np.sort(np.array(scale, dtype=np.float64))  # s0<=s1<=s2
+    eps = 1e-9
+    r21 = (s2 + eps) / (s1 + eps)  # longest / middle
+    r10 = (s1 + eps) / (s0 + eps)  # middle / shortest
+
+    # rod: one dimension much longer, cross-section similar
+    if (r21 > long_ratio) and (r10 < round_ratio):
+        return False
+
+    # flat: thickness much smaller, in-plane dims not too skewed
+    if (r10 > flat_ratio) and (r21 < plane_ratio):
+        return False
+
+    return True
+
 # -----------------------------
 # main function
 # -----------------------------
@@ -957,6 +977,13 @@ def merge_scene_gt_corners_world_multiframe(
 
         for b in inst_list:
             bid = b["id"]
+            category = b["category"]
+            if category in ['wall','floor','ceiling']: #TODO:added by lyq to ignore wall, floor, ceiling 26-1-19
+                continue
+            # scale = b["scale"]
+            # if not classify_shape(scale): #TODO:added by lyq to ignore extremely elongated or thin planar objects 26-1-19
+            #     continue
+            
             corners_cam = np.asarray(b["corners"], dtype=np.float64).reshape(8, 3)
             if bid not in buckets:
                 buckets[bid] = []

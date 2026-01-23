@@ -60,7 +60,9 @@ def get_image_augmentation(
     )
 
     if gray_scale:
-        transform_list.append(transforms.RandomGrayscale(p=0.05))
+        # TODO: added by lyq 26-1-19
+        # transform_list.append(transforms.RandomGrayscale(p=0.05))
+        transform_list.append(transforms.RandomGrayscale(p=0.02))
 
     if gau_blur:
         transform_list.append(

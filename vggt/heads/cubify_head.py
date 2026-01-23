@@ -537,8 +537,9 @@ class CubifyHead(nn.Module):
         mask_flatten = torch.cat(mask_flatten, 1)
         lvl_pos_embed_flatten = torch.cat(lvl_pos_embed_flatten, 1)
         
-        # 生成多尺度特征的索引信息
         spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=src.device)
+        # 生成多尺度特征的索引信息
+        
         level_start_index = torch.cat((spatial_shapes.new_zeros((1,)), spatial_shapes.prod(1).cumsum(0)[:-1]))
         valid_ratios = torch.stack([get_valid_ratio(m) for m in masks], 1)  # 有效区域比例
         
@@ -644,10 +645,10 @@ class CubifyHead(nn.Module):
         vggt_features = aggregated_tokens_list[-1][:, :, patch_start_idx:, :]
 
         
-        # fused_features = self.fusion_module(src_flatten, vggt_features.reshape(N_batch * N_img, vggt_features.shape[-2], vggt_features.shape[-1]), mask_flatten, vggt_hw=(HW_patch[0], HW_patch[1]))
+        fused_features = self.fusion_module(src_flatten, vggt_features.reshape(N_batch * N_img, vggt_features.shape[-2], vggt_features.shape[-1]), mask_flatten, vggt_hw=(HW_patch[0], HW_patch[1]))
         
-        fused_features = src_flatten # single frame
-        # fused_features = multiframe_fused_features #.reshape(1, -1, 256)  #[1, N*single_img_token, 256]
+        # fused_features = src_flatten # single frame no 2d-3d fusion
+
         
         fused_features = rearrange(fused_features, '(b n) c d -> b (n c) d', b = N_batch, n = N_img)
         mask_flatten = mask_flatten.reshape(N_batch, -1)
@@ -664,9 +665,12 @@ class CubifyHead(nn.Module):
     
         
         embedding_dim = fused_features.shape[-1]
-        # generate box 2d proposals and queries
+        # generate box 2d proposals and queries TODO: wrong but use before 26.1.14
+        # prompts = self.prompting.get_image_prompts(
+        #     fused_features, mask_flatten, spatial_shapes, sensor, N_batch, N_img, embedding_dim
+        # ) 
         prompts = self.prompting.get_image_prompts(
-            fused_features, mask_flatten, spatial_shapes, sensor, N_batch, N_img, embedding_dim
+            src_flatten, mask_flatten, spatial_shapes, sensor, N_batch, N_img, embedding_dim
         ) 
         prompters = self.prompting.prompters
         # 5. 解码器处理（核心预测流程）

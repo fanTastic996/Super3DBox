@@ -1,6 +1,6 @@
 import torch
 from vggt.models.vggt import VGGT
-from vggt.utils.load_fn import load_and_preprocess_images
+from vggt.utils.load_fn import load_and_preprocess_images, load_and_preprocess_images_mine, load_and_preprocess_images_resize
 from visual_util import segment_sky, download_file_from_url
 from vggt.utils.geometry import closed_form_inverse_se3, unproject_depth_map_to_point_map
 from vggt.utils.pose_enc import pose_encoding_to_extri_intri
@@ -17,8 +17,8 @@ dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.
 
 model = VGGT(enable_camera=True, enable_gravity=True, enable_point=False, enable_depth=False, enable_track=False, enable_cubify=True)
 # model = VGGT(enable_camera=True, enable_gravity=False, enable_point=False, enable_depth=False, enable_track=False, enable_cubify=True)
-# _URL = "/data1/lyq/logs/exp001/ckpts/checkpoint_bak.pt"
-_URL = "/data1/lyq/logs/exp001/ckpts/checkpoint_backup.pt"
+# _URL = "/data1/lyq/logs/exp001/ckpts/checkpoint.pt"
+_URL = "/data1/lyq/logs/exp001/ckpts/checkpoint_3k_full_144.pt"
 # _URL = "/home/lanyuqing/myproject/vggt/training/logs/exp001/ckpts/checkpoint_45444750_180_200_gravity_query.pt"
 model_dict= torch.load(_URL)
 model.load_state_dict(model_dict["model"]) 
@@ -28,22 +28,30 @@ model.eval()
 model.to(device)
 
 data_root = '/data1/lyq/CA1M-dataset/CA1M-dataset/training'
-scene_id = '42444750'
-# scene_id = '43896247' #'47332808'
+# scene_id = '42446540'
+# scene_id = '42899112' #'47895364'
+scene_id = 'scacsd' #'47895364'
+# scene_id = '42444750' #'47332808'
 # Load and preprocess example images (replace with your own image paths) 
 # scene_id = '47334115'
-# image_names = [f"{data_root}/{scene_id}/rgb/4.png", f"{data_root}/{scene_id}/rgb/14.png", f"{data_root}/{scene_id}/rgb/24.png"]  
+# image_names = [f"{data_root}/{scene_id}/rgb/83.png", f"{data_root}/{scene_id}/rgb/93.png", f"{data_root}/{scene_id}/rgb/103.png",  f"{data_root}/{scene_id}/rgb/113.png"]  
+image_names = ["/data1/lyq/70.JPG", "/data1/lyq/80.JPG", "/data1/lyq/85.JPG"]  
 
 # image_names = [f"{data_root}/{scene_id}/rgb/277.png", f"{data_root}/{scene_id}/rgb/287.png"]
 # image_names = [f"{data_root}/{scene_id}/rgb/520.png"]
 # image_names = [f"{data_root}/{scene_id}/rgb/50.png", f"{data_root}/{scene_id}/rgb/70.png"]
-image_names = [f"{data_root}/{scene_id}/rgb/180.png", f"{data_root}/{scene_id}/rgb/200.png"]
+# image_names = [f"{data_root}/{scene_id}/rgb/180.png", f"{data_root}/{scene_id}/rgb/200.png"]
 
-# image_names = ['/data1/lyq/4.jpg', '/data1/lyq/14.jpg', '/data1/lyq/24.jpg']
+# image_names = [f"{data_root}/{scene_id}/rgb/2.png", f"{data_root}/{scene_id}/rgb/219.png"]
+# image_names = [f"{data_root}/{scene_id}/rgb/0.png"] #219
 
-# image_names = [f"{data_root}/{scene_id}/rgb/438.png", f"{data_root}/{scene_id}/rgb/458.png", f"{data_root}/{scene_id}/rgb/478.png"]
+# image_names = [f"{data_root}/{scene_id}/rgb/2.png", f"{data_root}/{scene_id}/rgb/219.png", f"{data_root}/{scene_id}/rgb/436.png", f"{data_root}/{scene_id}/rgb/653.png", f"{data_root}/{scene_id}/rgb/870.png",f"{data_root}/{scene_id}/rgb/1087.png",f"{data_root}/{scene_id}/rgb/1304.png",f"{data_root}/{scene_id}/rgb/1521.png"]
+
+
 # image_names = [f"{data_root}/{scene_id}/rgb/200.png"]  
-images = load_and_preprocess_images(image_names).to(device)
+images = load_and_preprocess_images_resize(image_names).to(device)
+# images = load_and_preprocess_images_mine(image_names).to(device)
+# images = load_and_preprocess_images(image_names).to(device)
 print("images", images.shape, torch.max(images), torch.min(images))
 
 wanted_keys = ["extrinsic", "intrinsic", "box_result"]
@@ -82,6 +90,7 @@ with torch.no_grad():
             "size": predictions['pred_size'][0].cpu().numpy(),
             # 'ids': predictions['ids'][0].cpu().numpy(),
             'images': predictions['images'][0].cpu().numpy(),  # (N, 3, H, W)
+            'corners': predictions['pred_corners'][0].cpu().numpy(),
         }
         
         # valid_mask = pred_3d_boxes.scores.cpu().numpy()>=0.0

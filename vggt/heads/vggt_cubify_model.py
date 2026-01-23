@@ -528,16 +528,16 @@ class GlobalCrossAttention(nn.Module):
         # )
         # self.view_fuser = nn.TransformerEncoder(enc_layer, num_layers=self.view_fuse_layers)
         # 它把“每个 query 在 S 个 view 上的特征序列”当成一句话，用 Transformer 在 view 之间做信息交换；无效 view 用 key_padding_mask=True 屏蔽掉。
-        # self.view_fuser = ViewTransformerFuser(
-        #     d_model=self.embed_dim,
-        #     nhead=self.view_fuse_heads,
-        #     num_layers=self.view_fuse_layers,
-        #     dim_feedforward=self.view_fuse_ffn_mult * self.embed_dim,
-        #     dropout=self.view_fuse_drop,
-        #     norm_first=True,
-        # )
+        self.view_fuser = ViewTransformerFuser(
+            d_model=self.embed_dim,
+            nhead=self.view_fuse_heads,
+            num_layers=self.view_fuse_layers,
+            dim_feedforward=self.view_fuse_ffn_mult * self.embed_dim,
+            dropout=self.view_fuse_drop,
+            norm_first=True,
+        )
         
-        # self.view_fuse_norm = nn.LayerNorm(self.embed_dim)
+        self.view_fuse_norm = nn.LayerNorm(self.embed_dim)
         
     def build_cpb_mlp(self, in_dim, hidden_dim, out_dim):
         cpb_mlp = nn.Sequential(nn.Linear(in_dim, hidden_dim, bias=True),
@@ -631,244 +631,242 @@ class GlobalCrossAttention(nn.Module):
         return rpe
 
     # mvf-batch
-    # def forward(
-    #     self,
-    #     vggt_features,          # [B, S, 1369, Cv]
-    #     query,                  # [B*S, Nq, C]
-    #     reference_2d,           # [B*S, Np, 1, 4] (cxcywh in pixels)
-    #     k_input_flatten,        # [B*S, HW, C]
-    #     v_input_flatten,        # [B*S, HW, C]
-    #     input_spatial_shapes,   # [[h,w]] single-scale
-    #     input_padding_mask=None,# [B*S, HW] (0/1 or bool)
-    #     box_attn_prior_mask=None,# [Nq] bool OR long indices,
-    #     vHW_patch=(16, 16)
-    # ):
-    #     assert input_spatial_shapes.size(0) == 1, "single-scale only"
-    #     h_t, w_t = input_spatial_shapes[0]
-    #     h = int(h_t.item()) if torch.is_tensor(h_t) else int(h_t)
-    #     w = int(w_t.item()) if torch.is_tensor(w_t) else int(w_t)
-    #     stride = float(self.feature_stride)
+    def forward(
+        self,
+        vggt_features,          # [B, S, 1369, Cv]
+        query,                  # [B*S, Nq, C]
+        reference_2d,           # [B*S, Np, 1, 4] (cxcywh in pixels)
+        k_input_flatten,        # [B*S, HW, C]
+        v_input_flatten,        # [B*S, HW, C]
+        input_spatial_shapes,   # [[h,w]] single-scale
+        input_padding_mask=None,# [B*S, HW] (0/1 or bool)
+        box_attn_prior_mask=None,# [Nq] bool OR long indices,
+        vHW_patch=(16, 16)
+    ):
+        assert input_spatial_shapes.size(0) == 1, "single-scale only"
+        h_t, w_t = input_spatial_shapes[0]
+        h = int(h_t.item()) if torch.is_tensor(h_t) else int(h_t)
+        w = int(w_t.item()) if torch.is_tensor(w_t) else int(w_t)
+        stride = float(self.feature_stride)
 
-    #     # ---- infer B,S ----
-    #     assert vggt_features.ndim == 4, f"vggt_features should be [B,S,1369,Cv], got {tuple(vggt_features.shape)}"
-    #     B_v, S, Nt_v, Cv = vggt_features.shape
-    #     assert Nt_v == vHW_patch[0] * vHW_patch[1], f"expect 1369 vggt tokens, got {Nt_v}"
+        # ---- infer B,S ----
+        assert vggt_features.ndim == 4, f"vggt_features should be [B,S,1369,Cv], got {tuple(vggt_features.shape)}"
+        B_v, S, Nt_v, Cv = vggt_features.shape
+        assert Nt_v == vHW_patch[0] * vHW_patch[1], f"expect 1369 vggt tokens, got {Nt_v}"
 
-    #     BS, HW, C = k_input_flatten.shape
-    #     assert BS % S == 0, f"BS={BS} must be divisible by S={S}"
-    #     B = BS // S
+        BS, HW, C = k_input_flatten.shape
+        assert BS % S == 0, f"BS={BS} must be divisible by S={S}"
+        B = BS // S
 
-    #     BS2, Nq, C2 = query.shape
-    #     assert BS2 == BS and C2 == C
+        BS2, Nq, C2 = query.shape
+        assert BS2 == BS and C2 == C
 
-    #     # ---- ref ----
-    #     assert reference_2d.ndim == 4 and reference_2d.shape[0] == BS and reference_2d.shape[2] == 1 and reference_2d.shape[3] == 4
-    #     ref = reference_2d.squeeze(2)      # [BS,Np,4]
-    #     Np = ref.shape[1]
-    #     ref = ref.view(B, S, Np, 4)        # [B,S,Np,4]
-    #     assert Nq >= Np, f"Nq={Nq} must be >= Np={Np}"
+        # ---- ref ----
+        assert reference_2d.ndim == 4 and reference_2d.shape[0] == BS and reference_2d.shape[2] == 1 and reference_2d.shape[3] == 4
+        ref = reference_2d.squeeze(2)      # [BS,Np,4]
+        Np = ref.shape[1]
+        ref = ref.view(B, S, Np, 4)        # [B,S,Np,4]
+        assert Nq >= Np, f"Nq={Nq} must be >= Np={Np}"
 
-    #     device = query.device
-    #     dtype  = query.dtype
+        device = query.device
+        dtype  = query.dtype
 
-    #     if box_attn_prior_mask is None:
-    #         raise ValueError("box_attn_prior_mask must be provided (it selects proposal queries that use RPE).")
-    #     assert box_attn_prior_mask.ndim == 1 and box_attn_prior_mask.numel() == Nq
-    #     box_attn_prior_mask = box_attn_prior_mask.to(device=device)
+        if box_attn_prior_mask is None:
+            raise ValueError("box_attn_prior_mask must be provided (it selects proposal queries that use RPE).")
+        assert box_attn_prior_mask.ndim == 1 and box_attn_prior_mask.numel() == Nq
+        box_attn_prior_mask = box_attn_prior_mask.to(device=device)
 
-    #     # prop indices (长度 Np)
-    #     if box_attn_prior_mask.dtype == torch.bool:
-    #         prop_idx = torch.nonzero(box_attn_prior_mask, as_tuple=False).squeeze(1)  # [Np]
-    #         assert prop_idx.numel() == Np, f"box_attn_prior_mask.sum() must equal Np={Np}, got {prop_idx.numel()}"
-    #     else:
-    #         prop_idx = box_attn_prior_mask.long()
-    #         assert prop_idx.numel() == Np, f"box_attn_prior_mask must provide Np={Np} indices, got {prop_idx.numel()}"
+        # prop indices (长度 Np)
+        if box_attn_prior_mask.dtype == torch.bool:
+            prop_idx = torch.nonzero(box_attn_prior_mask, as_tuple=False).squeeze(1)  # [Np]
+            assert prop_idx.numel() == Np, f"box_attn_prior_mask.sum() must equal Np={Np}, got {prop_idx.numel()}"
+        else:
+            prop_idx = box_attn_prior_mask.long()
+            assert prop_idx.numel() == Np, f"box_attn_prior_mask must provide Np={Np} indices, got {prop_idx.numel()}"
 
-    #     # ---- reshape to [B,S,...] ----
-    #     query_ = query.view(B, S, Nq, C)              # [B,S,Nq,C]
-    #     k_in   = k_input_flatten.view(B, S, HW, C)    # [B,S,HW,C]
-    #     v_in   = v_input_flatten.view(B, S, HW, C)    # [B,S,HW,C]
+        # ---- reshape to [B,S,...] ----
+        query_ = query.view(B, S, Nq, C)              # [B,S,Nq,C]
+        k_in   = k_input_flatten.view(B, S, HW, C)    # [B,S,HW,C]
+        v_in   = v_input_flatten.view(B, S, HW, C)    # [B,S,HW,C]
 
-    #     # ---- project q/k/v ----
-    #     k = self.k(k_in).reshape(B, S, HW, self.num_heads, C // self.num_heads).permute(0, 1, 3, 2, 4).contiguous()  # [B,S,H,HW,Dh]
-    #     v = self.v(v_in).reshape(B, S, HW, self.num_heads, C // self.num_heads).permute(0, 1, 3, 2, 4).contiguous()  # [B,S,H,HW,Dh]
-    #     q = self.q(query_).reshape(B, S, Nq, self.num_heads, C // self.num_heads).permute(0, 1, 3, 2, 4).contiguous() # [B,S,H,Nq,Dh]
-    #     q = q * self.scale
+        # ---- project q/k/v ----
+        k = self.k(k_in).reshape(B, S, HW, self.num_heads, C // self.num_heads).permute(0, 1, 3, 2, 4).contiguous()  # [B,S,H,HW,Dh]
+        v = self.v(v_in).reshape(B, S, HW, self.num_heads, C // self.num_heads).permute(0, 1, 3, 2, 4).contiguous()  # [B,S,H,HW,Dh]
+        q = self.q(query_).reshape(B, S, Nq, self.num_heads, C // self.num_heads).permute(0, 1, 3, 2, 4).contiguous() # [B,S,H,Nq,Dh]
+        q = q * self.scale
 
-    #     # ---- cache pos_x / pos_y (float32) ----
-    #     if not hasattr(self, "_pos_cache"):
-    #         self._pos_cache = {}
-    #     pos_key = (device, h, w, float(stride))
-    #     if pos_key in self._pos_cache:
-    #         pos_x, pos_y = self._pos_cache[pos_key]
-    #     else:
-    #         pos_x = torch.linspace(0.5, w - 0.5, w, dtype=torch.float32, device=device)[None, None, :, None] * float(stride)  # [1,1,w,1]
-    #         pos_y = torch.linspace(0.5, h - 0.5, h, dtype=torch.float32, device=device)[None, None, :, None] * float(stride)  # [1,1,h,1]
-    #         self._pos_cache[pos_key] = (pos_x, pos_y)
+        # ---- cache pos_x / pos_y (float32) ----
+        if not hasattr(self, "_pos_cache"):
+            self._pos_cache = {}
+        pos_key = (device, h, w, float(stride))
+        if pos_key in self._pos_cache:
+            pos_x, pos_y = self._pos_cache[pos_key]
+        else:
+            pos_x = torch.linspace(0.5, w - 0.5, w, dtype=torch.float32, device=device)[None, None, :, None] * float(stride)  # [1,1,w,1]
+            pos_y = torch.linspace(0.5, h - 0.5, h, dtype=torch.float32, device=device)[None, None, :, None] * float(stride)  # [1,1,h,1]
+            self._pos_cache[pos_key] = (pos_x, pos_y)
 
-    #     # ---- VGGT mapping settings ----
-    #     if hasattr(self, "vggt_img_hw") and self.vggt_img_hw is not None:
-    #         H_img, W_img = int(self.vggt_img_hw[0]), int(self.vggt_img_hw[1])
-    #     else:
-    #         H_img, W_img = int(round(h * stride)), int(round(w * stride))
-    #     Hg_v, Wg_v = vHW_patch[0], vHW_patch[1]
+        # ---- cubify mapping settings ----
+        H_img, W_img = int(round(h * stride)), int(round(w * stride))
+        # ---- vggt mapping settings ----
+        Hg_v, Wg_v = vHW_patch[0], vHW_patch[1]
 
-    #     # ============================================================
-    #     # 1) VGGT cycle mapping: for ALL (b, s_src, s_tgt, proposal)
-    #     # ============================================================
-    #     # normalize vggt: [B,S,Nv,Cv]
-    #     vggt_n = F.normalize(vggt_features, dim=-1, eps=1e-8)
+        # ============================================================
+        # 1) VGGT cycle mapping: for ALL (b, s_src, s_tgt, proposal)
+        # ============================================================
+        # normalize vggt: [B,S,Nv,Cv]
+        vggt_n = F.normalize(vggt_features, dim=-1, eps=1e-8)
 
-    #     # src cxcy, wh
-    #     cxcy_src = ref[..., :2]  # [B,S,Np,2]
-    #     wh_src   = ref[..., 2:]  # [B,S,Np,2]
+        # src cxcy, wh
+        cxcy_src = ref[..., :2]  # [B,S,Np,2]
+        wh_src   = ref[..., 2:]  # [B,S,Np,2]
 
-    #     # compute src_tid [B,S,Np]
-    #     x = cxcy_src[..., 0].clamp(0.0, float(W_img - 1))
-    #     y = cxcy_src[..., 1].clamp(0.0, float(H_img - 1))
-    #     xn = x / max(float(W_img - 1), 1.0)
-    #     yn = y / max(float(H_img - 1), 1.0)
-    #     px = torch.floor(xn * Wg_v).long().clamp(0, Wg_v - 1)
-    #     py = torch.floor(yn * Hg_v).long().clamp(0, Hg_v - 1)
-    #     src_tid = (py * Wg_v + px).long()  # [B,S,Np]
+        # compute src_tid [B,S,Np]
+        x = cxcy_src[..., 0].clamp(0.0, float(W_img - 1))
+        y = cxcy_src[..., 1].clamp(0.0, float(H_img - 1))
+        xn = x / max(float(W_img - 1), 1.0)
+        yn = y / max(float(H_img - 1), 1.0)
+        px = torch.floor(xn * Wg_v).long().clamp(0, Wg_v - 1)
+        py = torch.floor(yn * Hg_v).long().clamp(0, Hg_v - 1)
+        src_tid = (py * Wg_v + px).long()  # [B,S,Np]
 
-    #     # qv: src_feat at src_tid -> [B,S,Np,Cv]
-    #     # take_along_dim needs index shape [B,S,Np,1] on dim=2
-    #     qv = torch.take_along_dim(vggt_n, src_tid[..., None].expand(B, S, Np, Cv), dim=2)  # [B,S,Np,Cv]
+        # qv: src_feat at src_tid -> [B,S,Np,Cv]
+        # take_along_dim needs index shape [B,S,Np,1] on dim=2
+        qv = torch.take_along_dim(vggt_n, src_tid[..., None].expand(B, S, Np, Cv), dim=2)  # [B,S,Np,Cv]
 
-    #     # sim_st: (qv) dot (tgt_feat) for all tgt views
-    #     # qv: [B,S,Np,Cv], vggt_n: [B,T,Nv,Cv]
-    #     # -> [B,S,Np,T,Nv]
-    #     sim_st = torch.einsum("bspc,btvc->bsptv", qv, vggt_n)  # [B,S,Np,S,Nv]
-    #     j = sim_st.argmax(dim=-1)                               # [B,S,Np,S]  (tgt token id)
+        # sim_st: (qv) dot (tgt_feat) for all tgt views
+        # qv: [B,S,Np,Cv], vggt_n: [B,T,Nv,Cv]
+        # -> [B,S,Np,T,Nv]
+        sim_st = torch.einsum("bspc,btvc->bsptv", qv, vggt_n)  # [B,S,Np,S,Nv]
+        j = sim_st.argmax(dim=-1)                               # [B,S,Np,S]  (tgt token id)
 
-    #     # expand vggt to [B, S_src, Np, S_tgt, Nv, Cv]
-    #     vggt_exp = vggt_n[:, None, None, :, :, :].expand(B, S, Np, S, Nt_v, Cv)
+        # expand vggt to [B, S_src, Np, S_tgt, Nv, Cv]
+        vggt_exp = vggt_n[:, None, None, :, :, :].expand(B, S, Np, S, Nt_v, Cv)
 
-    #     # build gather indices for Nv-dim (dim=4): [B, S_src, Np, S_tgt, 1, Cv]
-    #     idx = j[..., None, None].expand(B, S, Np, S, 1, Cv)
+        # build gather indices for Nv-dim (dim=4): [B, S_src, Np, S_tgt, 1, Cv]
+        idx = j[..., None, None].expand(B, S, Np, S, 1, Cv)
 
-    #     # gather along Nv dimension
-    #     tv = torch.gather(vggt_exp, dim=4, index=idx).squeeze(4)  # [B, S_src, Np, S_tgt, Cv]
+        # gather along Nv dimension
+        tv = torch.gather(vggt_exp, dim=4, index=idx).squeeze(4)  # [B, S_src, Np, S_tgt, Cv]
 
-    #     # sim_ts: tv dot src_feat -> [B,S,Np,S,Nv]
-    #     sim_ts = torch.einsum("bsptc,bsvc->bsptv", tv, vggt_n)  # [B,S,Np,S,Nv]
-    #     back_tid = sim_ts.argmax(dim=-1)                        # [B,S,Np,S]
+        # sim_ts: tv dot src_feat -> [B,S,Np,S,Nv]
+        sim_ts = torch.einsum("bsptc,bsvc->bsptv", tv, vggt_n)  # [B,S,Np,S,Nv]
+        back_tid = sim_ts.argmax(dim=-1)                        # [B,S,Np,S]
 
-    #     # convert ids to pixel centers
-    #     # tid_to_xy_center expects [*,] and returns [*,2]
-    #     cxcy_tgt  = self.tid_to_xy_center(j.reshape(-1), Wg_v, Hg_v, W_img, H_img).view(B, S, Np, S, 2)
-    #     cxcy_back = self.tid_to_xy_center(back_tid.reshape(-1), Wg_v, Hg_v, W_img, H_img).view(B, S, Np, S, 2)
+        # convert ids to pixel centers
+        # tid_to_xy_center expects [*,] and returns [*,2]
+        cxcy_tgt  = self.tid_to_xy_center(j.reshape(-1), Wg_v, Hg_v, W_img, H_img).view(B, S, Np, S, 2)
+        cxcy_back = self.tid_to_xy_center(back_tid.reshape(-1), Wg_v, Hg_v, W_img, H_img).view(B, S, Np, S, 2)
 
-    #     # cycle check
-    #     xy = cxcy_src[:, :, :, None, :]  # [B,S,Np,1,2]
-    #     cycle_dist = torch.linalg.norm(cxcy_back - xy, dim=-1)   # [B,S,Np,S]
-    #     ok = cycle_dist <= float(self.cycle_pix_thr)             # [B,S,Np,S] bool
+        # cycle check
+        xy = cxcy_src[:, :, :, None, :]  # [B,S,Np,1,2]
+        cycle_dist = torch.linalg.norm(cxcy_back - xy, dim=-1)   # [B,S,Np,S]
+        ok = cycle_dist <= float(self.cycle_pix_thr)             # [B,S,Np,S] bool
 
-    #     # self-view always ok, and cxcy_tgt = cxcy_src
-    #     eye = torch.eye(S, device=device, dtype=torch.bool)[None, None, None, :, :]  # [1,1,1,S,S]
-    #     # expand to [B,S,Np,S,S] then pick diagonal along last axis? easier:
-    #     # we want mask_self[b, s_src, p, s_tgt] == (s_tgt == s_src)
-    #     s_src_ids = torch.arange(S, device=device)[None, :, None, None]  # [1,S,1,1]
-    #     s_tgt_ids = torch.arange(S, device=device)[None, None, None, :]  # [1,1,1,S]
-    #     self_mask = (s_tgt_ids == s_src_ids)  # [1,S,1,S] broadcast to [B,S,Np,S]
-    #     self_mask = self_mask.expand(B, S, Np, S)
+        # self-view always ok, and cxcy_tgt = cxcy_src
+        eye = torch.eye(S, device=device, dtype=torch.bool)[None, None, None, :, :]  # [1,1,1,S,S]
+        # expand to [B,S,Np,S,S] then pick diagonal along last axis? easier:
+        # we want mask_self[b, s_src, p, s_tgt] == (s_tgt == s_src)
+        s_src_ids = torch.arange(S, device=device)[None, :, None, None]  # [1,S,1,1]
+        s_tgt_ids = torch.arange(S, device=device)[None, None, None, :]  # [1,1,1,S]
+        self_mask = (s_tgt_ids == s_src_ids)  # [1,S,1,S] broadcast to [B,S,Np,S]
+        self_mask = self_mask.expand(B, S, Np, S)
 
-    #     ok = torch.where(self_mask, torch.ones_like(ok), ok)
-    #     cxcy_tgt = torch.where(self_mask[..., None], xy.expand(B, S, Np, S, 2), cxcy_tgt)
+        ok = torch.where(self_mask, torch.ones_like(ok), ok)
+        cxcy_tgt = torch.where(self_mask[..., None], xy.expand(B, S, Np, S, 2), cxcy_tgt)
 
-    #     # invalid -> keep src center stable
-    #     cxcy_tgt = torch.where(ok[..., None], cxcy_tgt, xy.expand(B, S, Np, S, 2))
+        # invalid -> keep src center stable
+        cxcy_tgt = torch.where(ok[..., None], cxcy_tgt, xy.expand(B, S, Np, S, 2))
 
-    #     # build ref_tgt: [B,S,Np,S,4] then reshape to M=B*S*S
-    #     ref_tgt = torch.cat([cxcy_tgt, wh_src[:, :, :, None, :].expand(B, S, Np, S, 2)], dim=-1)  # [B,S,Np,S,4]
-    #     # permute to [B,S,S,Np,4]
-    #     ref_tgt = ref_tgt.permute(0, 1, 3, 2, 4).contiguous()  # [B,S,S,Np,4]
-    #     ok_all  = ok.permute(0, 1, 3, 2).contiguous()          # [B,S,S,Np]  (for vmask)
+        # build ref_tgt: [B,S,Np,S,4] then reshape to M=B*S*S
+        ref_tgt = torch.cat([cxcy_tgt, wh_src[:, :, :, None, :].expand(B, S, Np, S, 2)], dim=-1)  # [B,S,Np,S,4]
+        # permute to [B,S,S,Np,4]
+        ref_tgt = ref_tgt.permute(0, 1, 3, 2, 4).contiguous()  # [B,S,S,Np,4]
+        ok_all  = ok.permute(0, 1, 3, 2).contiguous()          # [B,S,S,Np]  (for vmask)
 
-    #     # ============================================================
-    #     # 2) base attention for ALL (src,tgt) + add RPE (scatter_add)
-    #     # ============================================================
-    #     # attn_all: [B, S_src, S_tgt, H, Nq, HW]
-    #     attn_all = torch.einsum("bshnd,bthmd->bsthnm", q, k)  # [B,S,S,H,Nq,HW]
+        # ============================================================
+        # 2) base attention for ALL (src,tgt) + add RPE (scatter_add)
+        # ============================================================
+        # attn_all: [B, S_src, S_tgt, H, Nq, HW]
+        attn_all = torch.einsum("bshnd,bthmd->bsthnm", q, k)  # [B,S,S,H,Nq,HW]
 
-    #     # RPE: compute for all pairs (b, s_src, s_tgt) in one go
-    #     M = B * S * S
-    #     ref_tgt_M = ref_tgt.view(M, Np, 4)
-    #     rpe_M = self._build_rpe_from_cxcywh_batched(ref_tgt_M, pos_x, pos_y)  # [M,H,Np,HW]
-    #     # gate invalid proposals
-    #     ok_M = ok_all.view(M, Np).to(rpe_M.dtype)  # [M,Np]
-    #     rpe_M = rpe_M * ok_M[:, None, :, None]     # [M,H,Np,HW]
-    #     rpe_all = rpe_M.view(B, S, S, self.num_heads, Np, HW)  # [B,S,S,H,Np,HW]
+        # RPE: compute for all pairs (b, s_src, s_tgt) in one go
+        M = B * S * S
+        ref_tgt_M = ref_tgt.view(M, Np, 4)
+        rpe_M = self._build_rpe_from_cxcywh_batched(ref_tgt_M, pos_x, pos_y)  # [M,H,Np,HW]
+        # gate invalid proposals
+        ok_M = ok_all.view(M, Np).to(rpe_M.dtype)  # [M,Np]
+        rpe_M = rpe_M * ok_M[:, None, :, None]     # [M,H,Np,HW]
+        rpe_all = rpe_M.view(B, S, S, self.num_heads, Np, HW)  # [B,S,S,H,Np,HW]
 
-    #     # scatter_add RPE into proposal query positions along Nq-dim (dim=4)
-    #     idx = prop_idx.view(1, 1, 1, 1, Np, 1).expand(B, S, S, self.num_heads, Np, HW)
-    #     attn_all = attn_all.scatter_add(dim=4, index=idx, src=rpe_all)
+        # scatter_add RPE into proposal query positions along Nq-dim (dim=4)
+        idx = prop_idx.view(1, 1, 1, 1, Np, 1).expand(B, S, S, self.num_heads, Np, HW)
+        attn_all = attn_all.scatter_add(dim=4, index=idx, src=rpe_all)
 
-    #     # padding mask (per tgt view)
-    #     if input_padding_mask is not None:
-    #         pad = input_padding_mask.view(B, S, HW).to(device=device)
-    #         if pad.dtype == torch.bool:
-    #             pad = pad.to(attn_all.dtype)
-    #         else:
-    #             pad = pad.to(attn_all.dtype)
-    #         # broadcast to [B,1,S,1,1,HW] then add
-    #         attn_all = attn_all + pad[:, None, :, None, None, :] * (-100.0)
+        # padding mask (per tgt view)
+        if input_padding_mask is not None:
+            pad = input_padding_mask.view(B, S, HW).to(device=device)
+            if pad.dtype == torch.bool:
+                pad = pad.to(attn_all.dtype)
+            else:
+                pad = pad.to(attn_all.dtype)
+            # broadcast to [B,1,S,1,1,HW] then add
+            attn_all = attn_all + pad[:, None, :, None, None, :] * (-100.0)
 
-    #     # softmax + dropout
-    #     fmin, fmax = torch.finfo(attn_all.dtype).min, torch.finfo(attn_all.dtype).max
-    #     attn_all = torch.clamp(attn_all, min=fmin, max=fmax)
-    #     attn_all = self.softmax(attn_all)
-    #     attn_all = self.attn_drop(attn_all)
+        # softmax + dropout
+        fmin, fmax = torch.finfo(attn_all.dtype).min, torch.finfo(attn_all.dtype).max
+        attn_all = torch.clamp(attn_all, min=fmin, max=fmax)
+        attn_all = self.softmax(attn_all)
+        attn_all = self.attn_drop(attn_all)
 
-    #     # aggregate values: [B,S,S,H,Nq,Dh] -> [B,S,S,Nq,C]
-    #     x_all = torch.einsum("bsthnm,bthmd->bsthnd", attn_all, v)                  # [B,S,S,H,Nq,Dh]
-    #     x_all = x_all.permute(0, 1, 2, 4, 3, 5).contiguous().view(B, S, S, Nq, C)  # [B,S,S,Nq,C]
+        # aggregate values: [B,S,S,H,Nq,Dh] -> [B,S,S,Nq,C]
+        x_all = torch.einsum("bsthnm,bthmd->bsthnd", attn_all, v)                  # [B,S,S,H,Nq,Dh]
+        x_all = x_all.permute(0, 1, 2, 4, 3, 5).contiguous().view(B, S, S, Nq, C)  # [B,S,S,Nq,C]
 
-    #     # ============================================================
-    #     # 3) view fuse: flatten (B*S*Nq) as batch, S as sequence length
-    #     # ============================================================
-    #     # x_view: [B,S_src,Nq,S_tgt,C]
-    #     x_view = x_all.permute(0, 1, 3, 2, 4).contiguous()  # [B,S,Nq,S,C]
+        # ============================================================
+        # 3) view fuse: flatten (B*S*Nq) as batch, S as sequence length
+        # ============================================================
+        # x_view: [B,S_src,Nq,S_tgt,C]
+        x_view = x_all.permute(0, 1, 3, 2, 4).contiguous()  # [B,S,Nq,S,C]
 
-    #     # vmask: [B,S,Nq,S]
-    #     vmask = torch.ones((B, S, Nq, S), device=device, dtype=x_view.dtype)
-    #     ok_float = ok_all.to(x_view.dtype)  # [B,S,S,Np]
-    #     # scatter ok into proposal query positions (dim=2)
-    #     idx2 = prop_idx.view(1, 1, Np, 1).expand(B, S, Np, S)
-    #     vmask = vmask.scatter(dim=2, index=idx2, src=ok_float.permute(0,1,3,2))  # ok -> [B,S,Np,S]
-    #     # self-view always valid
-    #     vmask[:, torch.arange(S, device=device), :, torch.arange(S, device=device)] = 1.0
+        # vmask: [B,S,Nq,S]
+        vmask = torch.ones((B, S, Nq, S), device=device, dtype=x_view.dtype)
+        ok_float = ok_all.to(x_view.dtype)  # [B,S,S,Np]
+        # scatter ok into proposal query positions (dim=2)
+        idx2 = prop_idx.view(1, 1, Np, 1).expand(B, S, Np, S)
+        vmask = vmask.scatter(dim=2, index=idx2, src=ok_float.permute(0,1,3,2))  # ok -> [B,S,Np,S]
+        # self-view always valid
+        vmask[:, torch.arange(S, device=device), :, torch.arange(S, device=device)] = 1.0
 
-    #     x_view = x_view * vmask[..., None]
-    #     key_pad = (vmask <= 0.5)  # [B,S,Nq,S] True=ignore
+        x_view = x_view * vmask[..., None]
+        key_pad = (vmask <= 0.5)  # [B,S,Nq,S] True=ignore
 
-    #     x_in = x_view.view(B * S * Nq, S, C)
-    #     key_pad_in = key_pad.view(B * S * Nq, S)
+        x_in = x_view.view(B * S * Nq, S, C)
+        key_pad_in = key_pad.view(B * S * Nq, S)
 
-    #     if self.view_fuse_fp32 and x_in.dtype in (torch.float16, torch.bfloat16):
-    #         x_in_f = x_in.float()
-    #     else:
-    #         x_in_f = x_in
+        if self.view_fuse_fp32 and x_in.dtype in (torch.float16, torch.bfloat16):
+            x_in_f = x_in.float()
+        else:
+            x_in_f = x_in
 
-    #     x_fused = self.view_fuser(x_in_f, key_padding_mask=key_pad_in)  # [B*S*Nq, S, C]
+        x_fused = self.view_fuser(x_in_f, key_padding_mask=key_pad_in)  # [B*S*Nq, S, C]
 
-    #     if x_fused.dtype != x_in.dtype:
-    #         x_fused = x_fused.to(x_in.dtype)
+        if x_fused.dtype != x_in.dtype:
+            x_fused = x_fused.to(x_in.dtype)
 
-    #     x_fused = x_fused.view(B, S, Nq, S, C)
+        x_fused = x_fused.view(B, S, Nq, S, C)
 
-    #     # take src position (for each src view, pick seq index = s_src)
-    #     gather_idx = torch.arange(S, device=device).view(1, S, 1, 1, 1).expand(B, S, Nq, 1, 1)
-    #     x_avg = x_fused.gather(dim=3, index=gather_idx.expand(B, S, Nq, 1, C)).squeeze(3)  # [B,S,Nq,C]
+        # take src position (for each src view, pick seq index = s_src)
+        gather_idx = torch.arange(S, device=device).view(1, S, 1, 1, 1).expand(B, S, Nq, 1, 1)
+        x_avg = x_fused.gather(dim=3, index=gather_idx.expand(B, S, Nq, 1, C)).squeeze(3)  # [B,S,Nq,C]
 
-    #     # norm + proj
-    #     x_avg = self.view_fuse_norm(x_avg)
-    #     x_avg = self.proj(x_avg)
-    #     x_avg = self.proj_drop(x_avg)
+        # norm + proj
+        x_avg = self.view_fuse_norm(x_avg)
+        x_avg = self.proj(x_avg)
+        x_avg = self.proj_drop(x_avg)
 
-    #     out = x_avg.view(B * S, Nq, C)
-    #     return out
+        out = x_avg.view(B * S, Nq, C)
+        return out
 
 
 # # Plain-DETR.
@@ -911,75 +909,75 @@ class GlobalCrossAttention(nn.Module):
 #                                 nn.Linear(hidden_dim, out_dim, bias=False))
 #         return cpb_mlp
 
-    def forward(
-        self,
-        vggt_features,
-        query,
-        reference_2d,
-        k_input_flatten,
-        v_input_flatten,
-        input_spatial_shapes,
-        input_padding_mask=None,
-        box_attn_prior_mask=None
-    ):
-        assert input_spatial_shapes.size(0) == 1, 'This is designed for single-scale decoder.'
-        h, w = input_spatial_shapes[0]
-        stride = self.feature_stride
+#     def forward(
+#         self,
+#         vggt_features,
+#         query,
+#         reference_2d,
+#         k_input_flatten,
+#         v_input_flatten,
+#         input_spatial_shapes,
+#         input_padding_mask=None,
+#         box_attn_prior_mask=None
+#     ):
+#         assert input_spatial_shapes.size(0) == 1, 'This is designed for single-scale decoder.'
+#         h, w = input_spatial_shapes[0]
+#         stride = self.feature_stride
 
-        ref_2d_xyxy = torch.cat([
-            reference_2d[:, :, :, :2] - reference_2d[:, :, :, 2:] / 2,
-            reference_2d[:, :, :, :2] + reference_2d[:, :, :, 2:] / 2,
-        ], dim=-1)  # B, nQ, 1, 4
+#         ref_2d_xyxy = torch.cat([
+#             reference_2d[:, :, :, :2] - reference_2d[:, :, :, 2:] / 2,
+#             reference_2d[:, :, :, :2] + reference_2d[:, :, :, 2:] / 2,
+#         ], dim=-1)  # B, nQ, 1, 4
 
-        pos_x = torch.linspace(0.5, w - 0.5, w, dtype=torch.float32, device=w.device)[None, None, :, None] * stride  # 1, 1, w, 1
-        pos_y = torch.linspace(0.5, h - 0.5, h, dtype=torch.float32, device=h.device)[None, None, :, None] * stride  # 1, 1, h, 1
+#         pos_x = torch.linspace(0.5, w - 0.5, w, dtype=torch.float32, device=w.device)[None, None, :, None] * stride  # 1, 1, w, 1
+#         pos_y = torch.linspace(0.5, h - 0.5, h, dtype=torch.float32, device=h.device)[None, None, :, None] * stride  # 1, 1, h, 1
 
-        if self.rpe_type == 'abs_log8':
-            delta_x = ref_2d_xyxy[..., 0::2] - pos_x  # B, nQ, w, 2
-            delta_y = ref_2d_xyxy[..., 1::2] - pos_y  # B, nQ, h, 2
-            delta_x = torch.sign(delta_x) * torch.log2(torch.abs(delta_x) + 1.0) / np.log2(8)
-            delta_y = torch.sign(delta_y) * torch.log2(torch.abs(delta_y) + 1.0) / np.log2(8)
-        elif self.rpe_type == 'linear':
-            delta_x = ref_2d_xyxy[..., 0::2] - pos_x  # B, nQ, w, 2
-            delta_y = ref_2d_xyxy[..., 1::2] - pos_y  # B, nQ, h, 2
-        else:
-            raise NotImplementedError
-        rpe_x, rpe_y = self.cpb_mlp1(delta_x), self.cpb_mlp2(delta_y)  # B, nQ, w/h, nheads
-        rpe = (rpe_x[:, :, None] + rpe_y[:, :, :, None]).flatten(2, 3) # B, nQ, h, w, nheads ->  B, nQ, h*w, nheads
-        rpe = rpe.permute(0, 3, 1, 2)
+#         if self.rpe_type == 'abs_log8':
+#             delta_x = ref_2d_xyxy[..., 0::2] - pos_x  # B, nQ, w, 2
+#             delta_y = ref_2d_xyxy[..., 1::2] - pos_y  # B, nQ, h, 2
+#             delta_x = torch.sign(delta_x) * torch.log2(torch.abs(delta_x) + 1.0) / np.log2(8)
+#             delta_y = torch.sign(delta_y) * torch.log2(torch.abs(delta_y) + 1.0) / np.log2(8)
+#         elif self.rpe_type == 'linear':
+#             delta_x = ref_2d_xyxy[..., 0::2] - pos_x  # B, nQ, w, 2
+#             delta_y = ref_2d_xyxy[..., 1::2] - pos_y  # B, nQ, h, 2
+#         else:
+#             raise NotImplementedError
+#         rpe_x, rpe_y = self.cpb_mlp1(delta_x), self.cpb_mlp2(delta_y)  # B, nQ, w/h, nheads
+#         rpe = (rpe_x[:, :, None] + rpe_y[:, :, :, None]).flatten(2, 3) # B, nQ, h, w, nheads ->  B, nQ, h*w, nheads
+#         rpe = rpe.permute(0, 3, 1, 2)
 
-        B_, N, C = k_input_flatten.shape
-        k = self.k(k_input_flatten).reshape(B_, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
-        v = self.v(v_input_flatten).reshape(B_, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
-        B_, N, C = query.shape
-        q = self.q(query).reshape(B_, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
+#         B_, N, C = k_input_flatten.shape
+#         k = self.k(k_input_flatten).reshape(B_, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
+#         v = self.v(v_input_flatten).reshape(B_, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
+#         B_, N, C = query.shape
+#         q = self.q(query).reshape(B_, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
 
-        q = q * self.scale
+#         q = q * self.scale
 
-        attn = q @ k.transpose(-2, -1)
+#         attn = q @ k.transpose(-2, -1)
 
-        # Only apply the RPE if the prior mask informs us to. Certain queries (like metric tokens) do not need priors.
-        if box_attn_prior_mask is not None:
-            attn[:, :, box_attn_prior_mask] += rpe
-        else:
-            attn += rpe
+#         # Only apply the RPE if the prior mask informs us to. Certain queries (like metric tokens) do not need priors.
+#         if box_attn_prior_mask is not None:
+#             attn[:, :, box_attn_prior_mask] += rpe
+#         else:
+#             attn += rpe
 
-        if input_padding_mask is not None:
-            attn += input_padding_mask[:, None, None] * -100
+#         if input_padding_mask is not None:
+#             attn += input_padding_mask[:, None, None] * -100
 
-        fmin, fmax = torch.finfo(attn.dtype).min, torch.finfo(attn.dtype).max
-        torch.clip_(attn, min=fmin, max=fmax)
+#         fmin, fmax = torch.finfo(attn.dtype).min, torch.finfo(attn.dtype).max
+#         torch.clip_(attn, min=fmin, max=fmax)
 
-        attn = self.softmax(attn)
-        attn = self.attn_drop(attn)
+#         attn = self.softmax(attn)
+#         attn = self.attn_drop(attn)
 
-        x = attn @ v
+#         x = attn @ v
 
-        x = x.transpose(1, 2).reshape(B_, N, C)
-        x = self.proj(x)
-        x = self.proj_drop(x)
+#         x = x.transpose(1, 2).reshape(B_, N, C)
+#         x = self.proj(x)
+#         x = self.proj_drop(x)
 
-        return x
+#         return x
 
 # Plain-DETR.
 class PreNormGlobalDecoderLayer(nn.Module):
@@ -1078,7 +1076,7 @@ class PreNormGlobalDecoderLayer(nn.Module):
                 src_spatial_shapes,
                 src_padding_mask,
                 box_attn_prior_mask=box_attn_prior_mask,
-                vHW_patch=(vHW_patch[0], vHW_patch[1])
+                vHW_patch=(vHW_patch[0], vHW_patch[1]) #TODO:
             )
 
             tgt = tgt + self.dropout1(tgt2)
@@ -2021,7 +2019,8 @@ class EncoderProposals(Prompter):
                 # if self.training:
                 #     results.append(self.train_single_image(batch_output, sensor["image"].data.image_sizes[index], topk=topk))
                 # else:
-                topk = min(topk, len(batch_output))
+                # topk = min(topk, len(batch_output))
+                topk = len(batch_output)
                 results.append(self.inference_single_image(batch_output, sensor["image"].data.image_sizes[index], topk=topk))
                 batch_output=[]
 

@@ -216,7 +216,7 @@ class GravityHead(nn.Module):
             list: A list of predicted camera encodings (post-activation) from each iteration.
         """
         # Use tokens from the last block for camera prediction.
-        tokens = aggregated_tokens_list[-1]
+        tokens = aggregated_tokens_list[-1] #.detach() #TODO:added by lyq
 
         # Extract the camera tokens ([2, 3, 1374, 2048]) [seq, img, tokens, features]
         pose_tokens = tokens[:, :, 0]

@@ -11,10 +11,10 @@ import argparse
 import json
 import numpy as np
 parser = argparse.ArgumentParser(description="IGGT Scene Processor")
-parser.add_argument('--model_path', type=str, default="/home/lanyuqing/myproject/code/vggt/training/logs/exp001/ckpts/checkpoint.pt", help='Path to model checkpoint')
-parser.add_argument('--json_dir', type=str, default="/data1/lyq/CA-1M-benchmark", help='Input directory path')
-parser.add_argument('--data_root', type=str, default="/data1/lyq/CA1M-dataset/CA1M-dataset/test", help='Input directory path')
-parser.add_argument('--save_dir', type=str, default="/data1/lyq/CA1M_results", help='Output directory path')
+parser.add_argument('--model_path', type=str, default="/home/lanyuqing/myproject/code/vggt/training/logs/exp001/ckpts/checkpoint_3k_full_144.pt", help='Path to model checkpoint')
+parser.add_argument('--json_dir', type=str, default="/data1/lyq/scannetpp_json/", help='Input directory path')
+parser.add_argument('--data_root', type=str, default="/data1/lyq/scannetpp", help='Input directory path')
+parser.add_argument('--save_dir', type=str, default="/data1/lyq/scannetpp_results", help='Output directory path')
 parser.add_argument('--overwrite', action='store_true', help='Overwrite existing predictions')
 args = parser.parse_args()
 
@@ -45,14 +45,15 @@ for json_path in json_paths:
     data_root = args.data_root
     count = 0
     for frame_ids in all_frame_ids:
-        if os.path.exists(f'{args.save_dir}/{scene_id}_{count}_pred.pkl') and not args.overwrite:
+        if os.path.exists(f'{args.save_dir}/{scene_id}_{count}_pred.pkl') and os.path.exists(f'{args.save_dir}/pkl/{scene_id}_{count}_pred.pkl') and not args.overwrite:
             count += 1
             print(f'{args.save_dir}/{scene_id}_{count}_pred.pkl already exists')
             continue
-        
+        if count > 3:
+            continue
         # Load and preprocess example images (replace with your own image paths) 
         # Build image list from indices in all_id_lists[idx]
-        image_names = [f"{data_root}/{scene_id}/rgb/{int(i)}.png" for i in frame_ids]
+        image_names = [f"{data_root}/{scene_id}/{count}/{int(i)}.JPG" for i in frame_ids]
 
         # images = load_and_preprocess_images(image_names).to(device)
         images = load_and_preprocess_images_resize(image_names).to(device)
@@ -97,6 +98,8 @@ for json_path in json_paths:
                     "scores": save_dict["box_result"]['scores'],
                     "corners": save_dict["box_result"]['corners'],
                 }
+                if not os.path.exists(f'{args.save_dir}/pkl/'):
+                    os.makedirs(f'{args.save_dir}/pkl/')
                 with open(f'{args.save_dir}/pkl/{scene_id}_{count}_pred.pkl', 'wb') as f:
                     pickle.dump(new_dict, f)  # 序列化并写入
                 print("saved to ", f'{args.save_dir}/pkl/{scene_id}_{count}_pred.pkl')

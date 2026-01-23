@@ -148,7 +148,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
             #         ),
             # frame_merger=AttentionFusionWithTorch(embed_dim=256, num_heads=8),
             # frame_merger=LightweightCrossViewFusion(feat_dim=256),
-            fusion_module=None,#DeformableSrcFuseVggt(d_src=cubify_embed_dim, d_vggt=2048),
+            fusion_module=DeformableSrcFuseVggt(d_src=cubify_embed_dim, d_vggt=2048),
             pixel_mean=[123.675, 116.28, 103.53],
             pixel_std=[58.395, 57.12, 57.375],
             topk_per_image=200) if enable_cubify else None
@@ -300,6 +300,8 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                 predictions["pred_R"] = [box_result[batch_idx].pred_boxes_3d.R for batch_idx in range(len(box_result))]
                 predictions["pred_center"] = [box_result[batch_idx].pred_boxes_3d.gravity_center for batch_idx in range(len(box_result))]
                 predictions["pred_size"] = [box_result[batch_idx].pred_boxes_3d.dims for batch_idx in range(len(box_result))]
+                # added
+                predictions["pred_boxes"] = [box_result[batch_idx].pred_boxes for batch_idx in range(len(box_result))]
                 
                 predictions["extrinsics"] = extrinsic
                 predictions["intrinsics"] = intrinsic
@@ -319,113 +321,113 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
         
         return predictions
 
-if __name__ == "__main__":
-    '''
-    Box Head
-    '''
-    backbone_embedding_dimension=768
-    dimension=backbone_embedding_dimension
-    dimension_to_heads = {
-        # ViT-B
-        768: 12,
-        # ViT-S
-        384: 6,
-        # ViT-T
-        192: 3
-    }
-    cubify_embed_dim = 256
-    depth_model = False
-    box_head = CubifyHead(
-        backbone=Joiner(
-            backbone=ViT(
-                img_size=None,
-                patch_size=16,
-                embed_dim=dimension,
-                depth=12,
-                num_heads=dimension_to_heads[dimension],
-                window_size=16,
-                mlp_ratio=4,
-                qkv_bias=True,
-                norm_layer=partial(nn.LayerNorm, eps=1e-6),
-                window_block_indexes=[
-                    0,
-                    1,
-                    3,
-                    4,
-                    6,
-                    7,
-                    9,
-                    10,
-                ],
-                residual_block_indexes=[],
-                use_rel_pos=False,
-                out_feature="last_feat",
-                depth_window_size=None,
-                layer_scale=not depth_model,
-                encoder_norm=not depth_model,
-                pretrain_img_size=512 if not depth_model else 224
-            )),            
-        pos_embedding=CameraRayEmbedding(dim=cubify_embed_dim),
-        prompting=CubifyAnythingPrompting(
-            embed_dim=cubify_embed_dim,
-            prompters=[
-                MetricQueries(
-                    input_channels=cubify_embed_dim,
-                    input_stride=16,
-                    predictors=None),            
-                EncoderProposals(
-                    input_channels=cubify_embed_dim,
-                    input_stride=16,
-                    level_strides=[16, 32, 64],
-                    predictors=[
-                        # Technically, this only gets supervised for 1 class (foreground).
-                        ClassPredictor(embed_dim=cubify_embed_dim, num_classes=2, num_layers=None),
-                        DeltaBox2DPredictor(embed_dim=cubify_embed_dim, num_layers=3),
-                    ],
-                    top_k_test=300,
-                ),
-            ],
-            encoders=PromptEncoders(
-                box_2d_encoder=Box2DPromptEncoderLearned(embed_dim=cubify_embed_dim)
-            )
-        ),
-        decoder=PromptDecoder(
-            embed_dim=cubify_embed_dim,
-            layer=PreNormGlobalDecoderLayer(
-                xattn=GlobalCrossAttention(
-                    dim=cubify_embed_dim,
-                    num_heads=8,
-                    rpe_hidden_dim=512,
-                    rpe_type="linear",
-                    feature_stride=16),
-                d_model=cubify_embed_dim,
-                d_ffn=2048, # for self-attention.
-                dropout=0.0,
-                activation=F.relu,
-                n_heads=8), # for self-attention.
-            num_layers=6,
-            predictors=[
-                ScalePredictor(embed_dim=cubify_embed_dim),
-                ClassPredictor(embed_dim=cubify_embed_dim, num_classes=2, num_layers=None),
-                DeltaBox2DPredictor(embed_dim=cubify_embed_dim, num_layers=3),
-                AbsoluteBox3DPredictor(
-                    embed_dim=cubify_embed_dim, num_layers=3, pose_type="z", z_type="direct", scale_shift=True)
-            ],
-            norm=nn.LayerNorm(cubify_embed_dim)),
-        #specialized for vggt spatial features
-        fusion_module=FeatureFusionModule_v2(in_channels=2048,
-                                             out_channels=256,
-                                             num_heads=8,
-                                             dropout=0.1,
-                                             fusion_type='add'),
-        vggt_merger=VGGTMerger(
-                    output_dim=2048, #config.hidden_size, #2048
-                    hidden_dim=4096, #getattr(config, "vggt_merger_hidden_dim", 4096), #4096
-                    context_dim=2048,
-                    spatial_merge_size=2 #config.vision_config.spatial_merge_size, # 2
-                ),
-        frame_merger=AttentionFusionWithTorch(embed_dim=256, num_heads=8),
-        pixel_mean=[123.675, 116.28, 103.53],
-        pixel_std=[58.395, 57.12, 57.375],
-        depth_model=depth_model)
-    print(box_head)
+# if __name__ == "__main__":
+    # '''
+    # Box Head
+    # '''
+    # backbone_embedding_dimension=768
+    # dimension=backbone_embedding_dimension
+    # dimension_to_heads = {
+    #     # ViT-B
+    #     768: 12,
+    #     # ViT-S
+    #     384: 6,
+    #     # ViT-T
+    #     192: 3
+    # }
+    # cubify_embed_dim = 256
+    # depth_model = False
+    # box_head = CubifyHead(
+    #     backbone=Joiner(
+    #         backbone=ViT(
+    #             img_size=None,
+    #             patch_size=16,
+    #             embed_dim=dimension,
+    #             depth=12,
+    #             num_heads=dimension_to_heads[dimension],
+    #             window_size=16,
+    #             mlp_ratio=4,
+    #             qkv_bias=True,
+    #             norm_layer=partial(nn.LayerNorm, eps=1e-6),
+    #             window_block_indexes=[
+    #                 0,
+    #                 1,
+    #                 3,
+    #                 4,
+    #                 6,
+    #                 7,
+    #                 9,
+    #                 10,
+    #             ],
+    #             residual_block_indexes=[],
+    #             use_rel_pos=False,
+    #             out_feature="last_feat",
+    #             depth_window_size=None,
+    #             layer_scale=not depth_model,
+    #             encoder_norm=not depth_model,
+    #             pretrain_img_size=512 if not depth_model else 224
+    #         )),            
+    #     pos_embedding=CameraRayEmbedding(dim=cubify_embed_dim),
+    #     prompting=CubifyAnythingPrompting(
+    #         embed_dim=cubify_embed_dim,
+    #         prompters=[
+    #             MetricQueries(
+    #                 input_channels=cubify_embed_dim,
+    #                 input_stride=16,
+    #                 predictors=None),            
+    #             EncoderProposals(
+    #                 input_channels=cubify_embed_dim,
+    #                 input_stride=16,
+    #                 level_strides=[16, 32, 64],
+    #                 predictors=[
+    #                     # Technically, this only gets supervised for 1 class (foreground).
+    #                     ClassPredictor(embed_dim=cubify_embed_dim, num_classes=2, num_layers=None),
+    #                     DeltaBox2DPredictor(embed_dim=cubify_embed_dim, num_layers=3),
+    #                 ],
+    #                 top_k_test=300,
+    #             ),
+    #         ],
+    #         encoders=PromptEncoders(
+    #             box_2d_encoder=Box2DPromptEncoderLearned(embed_dim=cubify_embed_dim)
+    #         )
+    #     ),
+    #     decoder=PromptDecoder(
+    #         embed_dim=cubify_embed_dim,
+    #         layer=PreNormGlobalDecoderLayer(
+    #             xattn=GlobalCrossAttention(
+    #                 dim=cubify_embed_dim,
+    #                 num_heads=8,
+    #                 rpe_hidden_dim=512,
+    #                 rpe_type="linear",
+    #                 feature_stride=16),
+    #             d_model=cubify_embed_dim,
+    #             d_ffn=2048, # for self-attention.
+    #             dropout=0.0,
+    #             activation=F.relu,
+    #             n_heads=8), # for self-attention.
+    #         num_layers=6,
+    #         predictors=[
+    #             ScalePredictor(embed_dim=cubify_embed_dim),
+    #             ClassPredictor(embed_dim=cubify_embed_dim, num_classes=2, num_layers=None),
+    #             DeltaBox2DPredictor(embed_dim=cubify_embed_dim, num_layers=3),
+    #             AbsoluteBox3DPredictor(
+    #                 embed_dim=cubify_embed_dim, num_layers=3, pose_type="z", z_type="direct", scale_shift=True)
+    #         ],
+    #         norm=nn.LayerNorm(cubify_embed_dim)),
+    #     #specialized for vggt spatial features
+    #     fusion_module=FeatureFusionModule_v2(in_channels=2048,
+    #                                          out_channels=256,
+    #                                          num_heads=8,
+    #                                          dropout=0.1,
+    #                                          fusion_type='add'),
+    #     vggt_merger=VGGTMerger(
+    #                 output_dim=2048, #config.hidden_size, #2048
+    #                 hidden_dim=4096, #getattr(config, "vggt_merger_hidden_dim", 4096), #4096
+    #                 context_dim=2048,
+    #                 spatial_merge_size=2 #config.vision_config.spatial_merge_size, # 2
+    #             ),
+    #     frame_merger=AttentionFusionWithTorch(embed_dim=256, num_heads=8),
+    #     pixel_mean=[123.675, 116.28, 103.53],
+    #     pixel_std=[58.395, 57.12, 57.375],
+    #     depth_model=depth_model)
+    # print(box_head)

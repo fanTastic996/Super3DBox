@@ -100,6 +100,8 @@ class CA1MDataset(BaseDataset):
             for seq_name in seq_list:
                 
                 seq_dir = osp.join(self.CA1M_DIR, seq_name)
+                if not os.path.exists(seq_dir):
+                    continue
                 seq_rgb_dir = osp.join(seq_dir, 'rgb')
                 len_seq_imgs = len(os.listdir(seq_rgb_dir)) # 获取序列图像数量
                 # 跳过图像数不足的序列
@@ -149,26 +151,43 @@ class CA1MDataset(BaseDataset):
         if seq_name is None:
             seq_name = self.sequence_list[seq_index]
         # 指定seq
-        # seq_name = '42444750'
-        # seq_name = '47334115'
+        # seq_name = '47895364'
+        # seq_name = '42444499'
         # 如果没有提供特定ID，则随机选择图像
         if ids is None:
             # ids = np.random.choice(
             #     self.data_store[seq_name], img_per_seq, replace=self.allow_duplicate_img
             # )
-            # ids = np.array([4, 14, 24])
+            # ids = np.array([0, 100])
             # ids = np.array([225, 240])
             # ids = np.array([460, 520])
             # ids = np.array([520])
+            # ids = np.array([2, 219, 436, 653, 870, 1087, 1304, 1521])
+
             
             # RANDOM SAMPLE
-            interval = 10
-            max_start = self.data_store[seq_name] - (img_per_seq - 1) * interval
-            # 随机选择一个起始索引（在安全范围内）
-            start_idx = np.random.randint(0, max_start) if max_start > 0 else 0
-            # 生成等间隔的索引数组
-            ids = np.array([start_idx + i * interval for i in range(img_per_seq)])
+            # interval = 10
+            # max_start = self.data_store[seq_name] - (img_per_seq - 1) * interval
+            # # 随机选择一个起始索引（在安全范围内）
+            # start_idx = np.random.randint(0, max_start) if max_start > 0 else 0
+            # # 生成等间隔的索引数组
+            # ids = np.array([start_idx + i * interval for i in range(img_per_seq)])
             # np.random.shuffle(ids) #打乱顺序
+            
+            interval = 10
+            total = int(self.data_store[seq_name])  # 序列总帧数（假设表示帧数量）
+
+            need = (img_per_seq - 1) * interval + 1
+
+            if total >= need:
+                # 原逻辑：按固定 interval 抽
+                max_start = total - need
+                start_idx = np.random.randint(0, max_start + 1) if max_start > 0 else 0
+                ids = start_idx + np.arange(img_per_seq) * interval
+            else:
+                # 不够用 interval=10：改为在 [0, total-1] 上等间隔取 img_per_seq 个
+                ids = np.linspace(0, total - 1, num=img_per_seq)
+                ids = np.round(ids).astype(np.int64)
             
         image_idxs = ids  # 获取图像ID
         #TODO:
