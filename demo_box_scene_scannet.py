@@ -11,7 +11,7 @@ import argparse
 import json
 import numpy as np
 parser = argparse.ArgumentParser(description="IGGT Scene Processor")
-parser.add_argument('--model_path', type=str, default="/home/lanyuqing/myproject/code/vggt/training/logs/exp001/ckpts/checkpoint_3k_full_144.pt", help='Path to model checkpoint')
+parser.add_argument('--model_path', type=str, default="/home/lanyuqing/myproject/code/vggt/training/logs/exp001/ckpts/checkpoint_3k_full_17_8imgs.pt", help='Path to model checkpoint')
 parser.add_argument('--json_dir', type=str, default="/data1/lyq/scannetpp_json/", help='Input directory path')
 parser.add_argument('--data_root', type=str, default="/data1/lyq/scannetpp", help='Input directory path')
 parser.add_argument('--save_dir', type=str, default="/data1/lyq/scannetpp_results", help='Output directory path')
