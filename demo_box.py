@@ -15,10 +15,10 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 # bfloat16 is supported on Ampere GPUs (Compute Capability 8.0+) 
 dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
 
-model = VGGT(enable_camera=True, enable_gravity=True, enable_point=False, enable_depth=False, enable_track=False, enable_cubify=True)
+model = VGGT(enable_camera=True, enable_gravity=True, enable_point=False, enable_depth=True, enable_track=False, enable_cubify=True)
 # model = VGGT(enable_camera=True, enable_gravity=False, enable_point=False, enable_depth=False, enable_track=False, enable_cubify=True)
-# _URL = "/data1/lyq/logs/exp001/ckpts/checkpoint.pt"
-_URL = "/data1/lyq/logs/exp001/ckpts/checkpoint_3k_full_144.pt"
+_URL = "/data1/lyq/logs/exp001/ckpts/checkpoint.pt"
+# _URL = "/data1/lyq/logs/exp001/ckpts/checkpoint_3k_full_144.pt"
 # _URL = "/home/lanyuqing/myproject/vggt/training/logs/exp001/ckpts/checkpoint_45444750_180_200_gravity_query.pt"
 model_dict= torch.load(_URL)
 model.load_state_dict(model_dict["model"]) 
