@@ -911,6 +911,67 @@ def classify_shape(scale,
 
     return True
 
+
+@torch.no_grad()
+def load_gt_corners_cam_multiframe(
+    data_path: str,
+    image_idx: Union[List[int], np.ndarray, torch.Tensor],
+    json_name_fmt: str = "instances_{idx}.json",
+    device: Union[str, torch.device, None] = None,
+) -> List[torch.Tensor]:
+    """
+    For each idx in image_idx, read json and return corners in CAMERA coordinates.
+
+    Returns:
+        corners_cam_list: List[torch.FloatTensor], length F
+            - corners_cam_list[i] has shape [Ni, 8, 3] on `device`
+            - if a frame has no boxes, returns empty tensor with shape [0, 8, 3]
+    Notes:
+        Each json is a list of dicts, each dict must contain:
+            b["corners"]  (8x3) in camera coordinates.
+        If you also need ids, tell me and I can return (ids_list, corners_list).
+    """
+    # ---- normalize image_idx ----
+    if isinstance(image_idx, torch.Tensor):
+        idx_list = image_idx.detach().cpu().long().tolist()
+    else:
+        idx_list = list(np.asarray(image_idx).astype(int).tolist())
+    F = len(idx_list)
+    assert F > 0, "image_idx is empty."
+
+    # ---- choose output device ----
+    if device is None:
+        device = "cpu"
+
+    corners_cam_list: List[torch.Tensor] = []
+
+    for idx in idx_list:
+        json_path = os.path.join(data_path, json_name_fmt.format(idx=idx))
+        if not os.path.exists(json_path):
+            raise FileNotFoundError(f"Missing json: {json_path}")
+
+        with open(json_path, "r") as f:
+            inst_list = json.load(f)
+
+        if not isinstance(inst_list, list):
+            raise ValueError(f"Expect list in {json_path}, got {type(inst_list)}")
+
+        corners_all = []
+        for b in inst_list:
+            corners_cam = np.asarray(b["corners"], dtype=np.float32).reshape(8, 3)
+            corners_all.append(corners_cam)
+
+        if len(corners_all) == 0:
+            # no boxes in this frame
+            corners_t = np.zeros((1, 8, 3), dtype=np.float32)
+        else:
+            corners_np = np.stack(corners_all, axis=0)  # [Ni,8,3]
+            corners_t = np.array(corners_np, dtype=np.float32)
+
+        corners_cam_list.append(corners_t)
+
+    return corners_cam_list
+
 # -----------------------------
 # main function
 # -----------------------------

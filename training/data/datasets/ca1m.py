@@ -122,6 +122,7 @@ class CA1MDataset(BaseDataset):
         logging.info(f"{status}: CA1M Data size: {self.sequence_list_len}")
         logging.info(f"{status}: CA1M Data dataset length: {self.total_frame_num}")
         
+        
     def get_data(
         self,
         seq_index: int = None, # 序列索引
@@ -333,7 +334,7 @@ class CA1MDataset(BaseDataset):
         # filtered_bbox_corners, _, _, ratio = filter_gt_boxes_by_2d_valid_area_ratio_np(filtered_bbox_corners, np.stack(intrinsics, axis=0), extrinsics_tmp, H=images[0].shape[0], W=images[0].shape[1], thr=0.2, extrinsic_is_c2w=False, return_debug=True)
         
         
-        if (isinstance(filtered_bbox_corners, np.ndarray) and filtered_bbox_corners.size == 0) or isinstance(filtered_bbox_corners, tuple):
+        if ((isinstance(filtered_bbox_corners, np.ndarray) and filtered_bbox_corners.size == 0) or isinstance(filtered_bbox_corners, tuple)) or isinstance(filtered_bbox_corners, tuple):
             print(f"No valid GT boxes found for seq {seq_name} with image ids {ids}. using fake GT...")
             filtered_bbox_corners = np.zeros((1, 8, 3), dtype=np.float32)  # 使用空的GT boxes
         # change boxes that are not parallel to Z-AXIS to be parallel
