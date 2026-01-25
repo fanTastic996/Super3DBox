@@ -174,7 +174,7 @@ class CA1MDataset(BaseDataset):
             # ids = np.array([start_idx + i * interval for i in range(img_per_seq)])
             # np.random.shuffle(ids) #打乱顺序
             
-            interval = 10
+            interval = np.random.randint(5,10)
             total = int(self.data_store[seq_name])  # 序列总帧数（假设表示帧数量）
 
             need = (img_per_seq - 1) * interval + 1
@@ -310,30 +310,30 @@ class CA1MDataset(BaseDataset):
         GT box extraction according to the selected images
         ''' 
         # Load Box GT information
-        # filtered_bbox_corners = self.filter_gt_boxes_for_images(scene_data, image_idxs, np.stack(intrinsics, axis=0), np.stack(depths, axis=0), frustum_threshold=4) # 4
+        filtered_bbox_corners = self.filter_gt_boxes_for_images(scene_data, image_idxs, np.stack(intrinsics, axis=0), np.stack(depths, axis=0), frustum_threshold=4) # 4
         
         
-        extrinsics_tmp = np.stack(extrinsics, axis=0)  # [N,3,4]
-        N = extrinsics_tmp.shape[0]
-        # 拼接一组[0,0,0,1]到每个外参，得到[N,4,4]
-        bottom = np.tile(np.array([0, 0, 0, 1], dtype=extrinsics_tmp.dtype), (N,1)).reshape(N,1,4)
-        extrinsics_tmp = np.concatenate([extrinsics_tmp, bottom], axis=1)  # [N,4,4]
+        # extrinsics_tmp = np.stack(extrinsics, axis=0)  # [N,3,4]
+        # N = extrinsics_tmp.shape[0]
+        # # 拼接一组[0,0,0,1]到每个外参，得到[N,4,4]
+        # bottom = np.tile(np.array([0, 0, 0, 1], dtype=extrinsics_tmp.dtype), (N,1)).reshape(N,1,4)
+        # extrinsics_tmp = np.concatenate([extrinsics_tmp, bottom], axis=1)  # [N,4,4]
         
-        filtered_bbox_corners = merge_scene_gt_corners_world_multiframe(
-            data_path=json_directory,
-            image_idx=image_idxs,
-            extrinsic=extrinsics_tmp,
-            json_name_fmt="{idx}.json",
-            extrinsic_is_w2c=True,   # set False if you pass in c2w
-            keep_single_view=True,
-            device="cpu",
-        )
+        # filtered_bbox_corners = merge_scene_gt_corners_world_multiframe(
+        #     data_path=json_directory,
+        #     image_idx=image_idxs,
+        #     extrinsic=extrinsics_tmp,
+        #     json_name_fmt="{idx}.json",
+        #     extrinsic_is_w2c=True,   # set False if you pass in c2w
+        #     keep_single_view=True,
+        #     device="cpu",
+        # )
         
         # filter boxes according to the box  visibility
-        filtered_bbox_corners, _, _, ratio = filter_gt_boxes_by_2d_valid_area_ratio_np(filtered_bbox_corners, np.stack(intrinsics, axis=0), extrinsics_tmp, H=images[0].shape[0], W=images[0].shape[1], thr=0.2, extrinsic_is_c2w=False, return_debug=True)
+        # filtered_bbox_corners, _, _, ratio = filter_gt_boxes_by_2d_valid_area_ratio_np(filtered_bbox_corners, np.stack(intrinsics, axis=0), extrinsics_tmp, H=images[0].shape[0], W=images[0].shape[1], thr=0.2, extrinsic_is_c2w=False, return_debug=True)
         
         
-        if isinstance(filtered_bbox_corners, np.ndarray) and filtered_bbox_corners.size == 0:
+        if (isinstance(filtered_bbox_corners, np.ndarray) and filtered_bbox_corners.size == 0) or isinstance(filtered_bbox_corners, tuple):
             print(f"No valid GT boxes found for seq {seq_name} with image ids {ids}. using fake GT...")
             filtered_bbox_corners = np.zeros((1, 8, 3), dtype=np.float32)  # 使用空的GT boxes
         # change boxes that are not parallel to Z-AXIS to be parallel
