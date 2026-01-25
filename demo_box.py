@@ -27,9 +27,13 @@ model.load_state_dict(model_dict["model"])
 model.eval()
 model.to(device)
 
-data_root = '/data1/lyq/CA1M-dataset/CA1M-dataset/training'
+data_root = '/data1/lyq/scannetpp'
+scene_id = '0a76e06478'
+
+# data_root = '/data1/lyq/CA1M-dataset/CA1M-dataset/training'
+# scene_id = '42899112' #'47895364'
 # scene_id = '42446540'
-scene_id = '42899112' #'47895364'
+
 # scene_id = 'scacsd' #'47895364'
 # scene_id = '42444750' #'47332808'
 # Load and preprocess example images (replace with your own image paths) 
@@ -40,7 +44,8 @@ scene_id = '42899112' #'47895364'
 # image_names = [f"{data_root}/{scene_id}/rgb/277.png", f"{data_root}/{scene_id}/rgb/287.png"]
 # image_names = [f"{data_root}/{scene_id}/rgb/520.png"]
 # image_names = [f"{data_root}/{scene_id}/rgb/50.png", f"{data_root}/{scene_id}/rgb/70.png"]
-image_names = [f"{data_root}/{scene_id}/rgb/320.png", f"{data_root}/{scene_id}/rgb/325.png"]
+# image_names = [f"{data_root}/{scene_id}/rgb/320.png", f"{data_root}/{scene_id}/rgb/325.png"]
+image_names = [f"{data_root}/{scene_id}/1/31.JPG", f"{data_root}/{scene_id}/1/36.JPG",f"{data_root}/{scene_id}/1/41.JPG",f"{data_root}/{scene_id}/1/46.JPG"]
 
 # image_names = [f"{data_root}/{scene_id}/rgb/2.png", f"{data_root}/{scene_id}/rgb/219.png"]
 # image_names = [f"{data_root}/{scene_id}/rgb/0.png"] #219
