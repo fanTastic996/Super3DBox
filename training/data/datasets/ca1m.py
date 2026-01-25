@@ -311,7 +311,7 @@ class CA1MDataset(BaseDataset):
         GT box extraction according to the selected images
         ''' 
         # Load Box GT information
-        filtered_bbox_corners = self.filter_gt_boxes_for_images(scene_data, image_idxs, np.stack(intrinsics, axis=0), np.stack(depths, axis=0), frustum_threshold=4) # 4
+        # filtered_bbox_corners = self.filter_gt_boxes_for_images(scene_data, image_idxs, np.stack(intrinsics, axis=0), np.stack(depths, axis=0), frustum_threshold=4) # 4
         
         
         # extrinsics_tmp = np.stack(extrinsics, axis=0)  # [N,3,4]
@@ -334,13 +334,21 @@ class CA1MDataset(BaseDataset):
         # filtered_bbox_corners, _, _, ratio = filter_gt_boxes_by_2d_valid_area_ratio_np(filtered_bbox_corners, np.stack(intrinsics, axis=0), extrinsics_tmp, H=images[0].shape[0], W=images[0].shape[1], thr=0.2, extrinsic_is_c2w=False, return_debug=True)
         
         
-        if ((isinstance(filtered_bbox_corners, np.ndarray) and filtered_bbox_corners.size == 0) or isinstance(filtered_bbox_corners, tuple)) or isinstance(filtered_bbox_corners, tuple):
-            print(f"No valid GT boxes found for seq {seq_name} with image ids {ids}. using fake GT...")
-            filtered_bbox_corners = np.zeros((1, 8, 3), dtype=np.float32)  # 使用空的GT boxes
+        corners_cam_list = load_gt_corners_cam_multiframe(json_directory, image_idxs,json_name_fmt="{idx}.json", device="cpu")
+        
+        
+        # 使用空的GT boxes
         # change boxes that are not parallel to Z-AXIS to be parallel
         # filtered_bbox_corners, tilted_mask, tilt_degs = self.upright_boxes(filtered_bbox_corners, tilt_deg_thresh=5.0)
+        
         # padding invalid boxes
-        bbox_corners = self.process_bbox_corners(filtered_bbox_corners)  # 处理边界框角点
+        for i in range(len(corners_cam_list)):
+            if isinstance(corners_cam_list[i], tuple):
+                print(f"No valid GT boxes found for seq {seq_name} with image ids {ids}. using fake GT...")
+                corners_cam_list[i] = np.zeros((1, 8, 3), dtype=np.float32) 
+            corners_cam_list[i] = self.process_bbox_corners(corners_cam_list[i])
+        # bbox_corners = self.process_bbox_corners(filtered_bbox_corners)  # 处理边界框角点
+        corners_cam_list = np.stack(corners_cam_list, axis=0).reshape(-1, 8, 3)
 
 
 
@@ -357,7 +365,7 @@ class CA1MDataset(BaseDataset):
             "intrinsics": intrinsics,        # 内参矩阵列表
             "cam_points": cam_points,        # 相机坐标系点列表
             "world_points": world_points,    # 世界坐标系点列表
-            "bbox_corners": bbox_corners, # 边界框角点列表
+            "bbox_corners": corners_cam_list, # 边界框角点列表
             "point_masks": point_masks,      # 点掩码列表
             "original_sizes": original_sizes,  # 原始尺寸列表
             "gravity": all_gravity
@@ -381,9 +389,9 @@ class CA1MDataset(BaseDataset):
         current_size = bbox_corners.shape[0]
         
         # 情况1：不足500时进行填充
-        if current_size < 1000:
+        if current_size < 500:
             # 创建目标数组并填充原始数据
-            padded = np.zeros((1000, 8, 3), dtype=bbox_corners.dtype)
+            padded = np.zeros((500, 8, 3), dtype=bbox_corners.dtype)
             # print("bbox_corners shape:", bbox_corners.shape)
             # print("current_size:", current_size)
             # print("pad_size:", padded.shape)
@@ -391,8 +399,8 @@ class CA1MDataset(BaseDataset):
             return padded
         
         # 情况2：超过500时截断
-        elif current_size > 1000:
-            return bbox_corners[:1000]
+        elif current_size > 500:
+            return bbox_corners[:500]
         
         # 情况3：正好500时直接返回
         else:

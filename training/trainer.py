@@ -1005,7 +1005,7 @@ class Trainer:
                 depths=batch["depths"],
                 point_masks=batch["point_masks"],
                 bbox_corners=batch["bbox_corners"],
-                scale_by_points=False #False
+                scale_by_points=True #False
             )
 
         # Replace the original values in the batch with the normalized ones.
