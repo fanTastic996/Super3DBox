@@ -29,18 +29,18 @@ model.to(device)
 
 data_root = '/data1/lyq/CA1M-dataset/CA1M-dataset/training'
 # scene_id = '42446540'
-# scene_id = '42899112' #'47895364'
-scene_id = 'scacsd' #'47895364'
+scene_id = '42899112' #'47895364'
+# scene_id = 'scacsd' #'47895364'
 # scene_id = '42444750' #'47332808'
 # Load and preprocess example images (replace with your own image paths) 
 # scene_id = '47334115'
 # image_names = [f"{data_root}/{scene_id}/rgb/83.png", f"{data_root}/{scene_id}/rgb/93.png", f"{data_root}/{scene_id}/rgb/103.png",  f"{data_root}/{scene_id}/rgb/113.png"]  
-image_names = ["/data1/lyq/70.JPG", "/data1/lyq/80.JPG", "/data1/lyq/85.JPG"]  
+# image_names = ["/data1/lyq/70.JPG", "/data1/lyq/80.JPG", "/data1/lyq/85.JPG"]  
 
 # image_names = [f"{data_root}/{scene_id}/rgb/277.png", f"{data_root}/{scene_id}/rgb/287.png"]
 # image_names = [f"{data_root}/{scene_id}/rgb/520.png"]
 # image_names = [f"{data_root}/{scene_id}/rgb/50.png", f"{data_root}/{scene_id}/rgb/70.png"]
-# image_names = [f"{data_root}/{scene_id}/rgb/180.png", f"{data_root}/{scene_id}/rgb/200.png"]
+image_names = [f"{data_root}/{scene_id}/rgb/320.png", f"{data_root}/{scene_id}/rgb/325.png"]
 
 # image_names = [f"{data_root}/{scene_id}/rgb/2.png", f"{data_root}/{scene_id}/rgb/219.png"]
 # image_names = [f"{data_root}/{scene_id}/rgb/0.png"] #219
@@ -85,12 +85,14 @@ with torch.no_grad():
         
         save_dict["box_result"] = {
             "scores": predictions['pred_scores'][0].cpu().numpy(),
-            "R": predictions['pred_R'][0].cpu().numpy(),
-            "center": predictions['pred_center'][0].cpu().numpy(),
-            "size": predictions['pred_size'][0].cpu().numpy(),
+            "R": predictions['pred_R_g'][0].cpu().numpy(),
+            "center": predictions['pred_center_g'][0].cpu().numpy(),
+            "size": predictions['pred_size_g'][0].cpu().numpy(),
             # 'ids': predictions['ids'][0].cpu().numpy(),
             'images': predictions['images'][0].cpu().numpy(),  # (N, 3, H, W)
-            'corners': predictions['pred_corners'][0].cpu().numpy(),
+            'corners': predictions['pred_corners_g'][0].cpu().numpy(),
+            # 'corners_g': predictions['pred_corners_g'][0].cpu().numpy(),
+            # 'center_g': predictions['pred_center_g'][0].cpu().numpy(),
         }
         
         # valid_mask = pred_3d_boxes.scores.cpu().numpy()>=0.0

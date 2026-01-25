@@ -703,7 +703,7 @@ class CubifyHead(nn.Module):
             # 仅处理需要输出的提示
             if prompt.has_output:
                 # 调用提示器的推理方法（如框预测、分割等）
-                results = prompter.inference( # only encoderproposals prompter since metric queries have already been done in previous steps.
+                results = prompter.train_inference( # only encoderproposals prompter since metricproposal queries have already been done in previous steps.
                     prompt_outputs_, sensor, 
                     self.topk_per_image,
                     intrinsic, extrinsic, gravity

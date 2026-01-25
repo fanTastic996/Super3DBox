@@ -1040,7 +1040,7 @@ class Trainer:
     def _save_results(self, y_hat, val_flag=False):
         save_dict = {}
               
-        for key in ['images', 'seq_name', 'ids', 'extrinsics', 'intrinsics', 'pred_corners', 'pred_logits', 'pred_scores', 'pred_R', 'pred_center', 'pred_size']:
+        for key in ['images', 'seq_name', 'ids', 'extrinsics', 'intrinsics', 'pred_corners', 'pred_corners_g', 'pred_logits', 'pred_scores', 'pred_R', 'pred_center', 'pred_size']:
             if key in y_hat:
                 value = y_hat[key][0]
                 # # 如果value有detach方法则说明是tensor，否则直接赋值

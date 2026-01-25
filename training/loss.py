@@ -1535,70 +1535,51 @@ def compute_box_logit_loss(pred_corners, pred_logits, pred_boxes, pred_all_quad,
     total_reg_loss = 0
     N_seq = len(pred_corners)
     seq_count = 0
+    gt_per_img = 500
+    N_img = batch['bbox_corners'].shape[1] // gt_per_img
+    N_pred_per_img = pred_boxes[0].shape[0] // N_img
     # calcudate loss for each sequence
     # TODO: accelerate this
     for i in range(N_seq):
-        pred_box_corners = pred_corners[i]
-        pred_box_logits = pred_logits[i]
-        N_imgs = len(pred_box_corners)
-        
-        # 2D regularization loss
-        pred_box_boxes = pred_boxes[i]
-        pred_scores = pred_box_logits.sigmoid()[:, 1]
-        N_imgs = len(pred_box_corners)
-        loss_reg_2d_single = 0
-        single_reg_loss = 0
-        for start_idx in range(0, N_imgs, 100):
-            end_idx = min(start_idx + 100, N_imgs)
-            loss_reg_2d = duplicate_iou_regularizer_2d_xyxy(
-                pred_box_boxes[start_idx:end_idx], scores=pred_scores[start_idx:end_idx],
-                iou_thr=0.3, score_thr=0.6, power=2.0, reduction="mean"
-            )
-            loss_reg_2d_single += loss_reg_2d
-        loss_reg_2d_single /= (N_imgs/100) 
-        loss_reg_3d = duplicate_regularizer_3d_aabb(
-            corners=pred_box_corners,   # [N,8,3] (推荐)
-            scores=pred_scores,          # [N]
-            iou_thr=0.5,
-            score_thr=0.7,
-            topk=400,
-            power=1.0,
-            normalize_margin=True,
-            score_power=1.0,
-        )
-        single_reg_loss = loss_reg_2d_single * 10.0 + loss_reg_3d
-        single_reg_loss *= 0.1
-        
-        
-
-        gt_box_corners_seq = batch['bbox_corners'][i] # [N_gt, 8 ,3]
-        gt_box_corners_seq_sum = gt_box_corners_seq.sum(dim=[1, 2]) #[500]
-        gt_box_mask = gt_box_corners_seq_sum != 0.0
-        gt_box_corners_seq = gt_box_corners_seq[gt_box_mask]  # [N_gt, 8, 3]
-        
-        gt_box_corners = gt_box_corners_seq #gt_box_corners 
-        
-        if len(gt_box_corners)==0:
-            continue
-        
-        loss, chamfer_loss_val, class_loss, center_loss = compute_box_logit_loss_single(pred_box_corners, pred_box_logits, gt_box_corners, w_box=1.0, w_class=1.0, w_center=3.0, w_giou=1.0) #w_class=0.05
-        # loss = chamfer_loss(pred_box_corners, gt_box_corners) 
-        
-        pred_quad = pred_all_quad[i]
-        gt_quad = batch['gravity'][i]
-        rot_loss = quaternion_geodesic_loss(pred_quad, gt_quad) * 0.5 #默认权重w=1
-        
-        total_loss += loss
-        total_chamfer_loss += chamfer_loss_val
-        total_class_loss += class_loss
-        total_center_loss += center_loss
-        # total_giou_loss += giou_loss
-        total_rot_loss += rot_loss
-        total_reg_loss += single_reg_loss
-        total_loss += rot_loss
-        total_loss += single_reg_loss
-        # total_loss = rot_loss
-        seq_count+=1
+        for j in range(N_img):
+            pred_box_corners_batch = pred_corners[i] #[700, 8, 3]
+            pred_box_logits_batch = pred_logits[i] #[700, 2]
+            pred_box_corners_batch = pred_box_corners_batch.reshape(N_img, N_pred_per_img, 8, 3)
+            pred_box_logits_batch = pred_box_logits_batch.reshape(N_img, N_pred_per_img, 2)
+            
+            pred_box_corners = pred_box_corners_batch[j]
+            pred_box_logits = pred_box_logits_batch[j]
+            
+            gt_box_batch = batch['bbox_corners'][i].reshape(N_img, gt_per_img, 8, 3) # [N_img, gt_per_img, 8 ,3]
+            cur_gt = gt_box_batch[j]
+            gt_box_corners_seq = cur_gt #batch['bbox_corners'][i] # [N_gt, 8 ,3]
+            gt_box_corners_seq_sum = gt_box_corners_seq.sum(dim=[1, 2]) #[500]
+            gt_box_mask = gt_box_corners_seq_sum != 0.0
+            gt_box_corners_seq = gt_box_corners_seq[gt_box_mask]  # [N_gt, 8, 3]
+            
+            gt_box_corners = gt_box_corners_seq #gt_box_corners 
+            
+            if len(gt_box_corners)==0:
+                continue
+            
+            loss, chamfer_loss_val, class_loss, center_loss = compute_box_logit_loss_single(pred_box_corners, pred_box_logits, gt_box_corners, w_box=1.0, w_class=1.0, w_center=3.0, w_giou=1.0) #w_class=0.05
+            # loss = chamfer_loss(pred_box_corners, gt_box_corners) 
+            
+            pred_quad = pred_all_quad[i,j] #[4,7,4]
+            gt_quad = batch['gravity'][i,j] #[4,7,4]
+            rot_loss = quaternion_geodesic_loss(pred_quad, gt_quad) * 0.5 #默认权重w=1
+            
+            total_loss += loss
+            total_chamfer_loss += chamfer_loss_val
+            total_class_loss += class_loss
+            total_center_loss += center_loss
+            # total_giou_loss += giou_loss
+            total_rot_loss += rot_loss
+            # total_reg_loss += single_reg_loss
+            total_loss += rot_loss
+            # total_loss += single_reg_loss
+            # total_loss = rot_loss
+            seq_count+=1
     
     if seq_count>0:
         total_loss = total_loss / seq_count
@@ -1606,7 +1587,7 @@ def compute_box_logit_loss(pred_corners, pred_logits, pred_boxes, pred_all_quad,
         total_class_loss = total_class_loss / seq_count
         total_center_loss = total_center_loss / seq_count
         total_rot_loss = total_rot_loss / seq_count
-        total_reg_loss = total_reg_loss / seq_count
+        # total_reg_loss = total_reg_loss / seq_count
         # total_giou_loss = total_giou_loss / seq_count
     loss_dict = {
         f"loss_box": total_loss,
@@ -1614,7 +1595,7 @@ def compute_box_logit_loss(pred_corners, pred_logits, pred_boxes, pred_all_quad,
         f"loss_class": total_class_loss,
         f"loss_center": total_center_loss,
         f"loss_rot": total_rot_loss,
-        f"loss_reg": total_reg_loss,
+        # f"loss_reg": total_reg_loss,
         # f"loss_giou": total_giou_loss,
     }
 

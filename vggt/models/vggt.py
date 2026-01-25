@@ -294,14 +294,19 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
 
                 # else:
                 predictions["pred_corners"] = [box_result[batch_idx].pred_boxes_3d.corners for batch_idx in range(len(box_result))]
+                predictions["pred_corners_g"] = [box_result[batch_idx].pred_boxes_3d_g.corners for batch_idx in range(len(box_result))]
                 predictions["pred_logits"] = [box_result[batch_idx].pred_logits for batch_idx in range(len(box_result))]
                 
                 predictions["pred_scores"] = [box_result[batch_idx].scores for batch_idx in range(len(box_result))]
                 predictions["pred_R"] = [box_result[batch_idx].pred_boxes_3d.R for batch_idx in range(len(box_result))]
+                predictions["pred_R_g"] = [box_result[batch_idx].pred_boxes_3d_g.R for batch_idx in range(len(box_result))]
                 predictions["pred_center"] = [box_result[batch_idx].pred_boxes_3d.gravity_center for batch_idx in range(len(box_result))]
+                predictions["pred_center_g"] = [box_result[batch_idx].pred_boxes_3d_g.gravity_center for batch_idx in range(len(box_result))]
                 predictions["pred_size"] = [box_result[batch_idx].pred_boxes_3d.dims for batch_idx in range(len(box_result))]
+                predictions["pred_size_g"] = [box_result[batch_idx].pred_boxes_3d_g.dims for batch_idx in range(len(box_result))]
                 # added
                 predictions["pred_boxes"] = [box_result[batch_idx].pred_boxes for batch_idx in range(len(box_result))]
+
                 
                 predictions["extrinsics"] = extrinsic
                 predictions["intrinsics"] = intrinsic

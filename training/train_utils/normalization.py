@@ -479,17 +479,29 @@ def normalize_camera_extrinsics_and_points_boxes_batch(
         t = extrinsics[:, 0, :3, 3]
         new_world_points = (world_points @ R.transpose(-1, -2).unsqueeze(1).unsqueeze(2)) + t.unsqueeze(1).unsqueeze(2).unsqueeze(3)
         
-        
+        # TODO: do not transform the gt box to global coordinate system
         bbox_corners_sum = bbox_corners.sum(dim=[-2, -1]) 
         padding_bbox_mask = bbox_corners_sum == 0.0 # [B, N_box]
         # (B, N_box, 8, 3) @ (B, 1, 3, 3) -> (B, N_box, 8, 3)
-        new_bbox_corners = (bbox_corners @ R.transpose(-1, -2).unsqueeze(1)) + t.unsqueeze(1).unsqueeze(1)
+        # new_bbox_corners = (bbox_corners @ R.transpose(-1, -2).unsqueeze(1)) + t.unsqueeze(1).unsqueeze(1)
+        
+        new_bbox_corners = bbox_corners
 
 
     new_cam_points = cam_points.clone()
     new_depths = depths.clone()
     # 缩放控制：根据点云距离归一化场景尺度
     if scale_by_points:
+        
+        BB, SS, HH, WW = point_masks.shape
+        total = SS * HH * WW  # 1,269,100
+        valid_count = point_masks.sum(dim=[1,2,3])
+        valid_ratio = valid_count / float(total)
+        # 阈值你可以先用 0.001 ~ 0.01 试（0.1%~1% 有效点）
+        min_ratio = 0.002  # 0.2%
+        good_batch = valid_ratio >= min_ratio   # [B] bool
+        bad_batch = ~good_batch                 # [B]
+
         # 创建相机坐标点和深度的拷贝（避免修改原始数据）
         new_cam_points = cam_points.clone()
         new_depths = depths.clone()
@@ -497,7 +509,7 @@ def normalize_camera_extrinsics_and_points_boxes_batch(
         dist = new_world_points.norm(dim=-1)
         # 根据点掩码计算有效距离总和及有效点数量
         dist_sum = (dist * point_masks).sum(dim=[1,2,3])
-        valid_count = point_masks.sum(dim=[1,2,3])
+
         # 计算平均距离（分母添加小量防除零）
         avg_scale = (dist_sum / (valid_count + 1e-3)).clamp(min=1e-6, max=1e6)
 
@@ -506,6 +518,9 @@ def normalize_camera_extrinsics_and_points_boxes_batch(
         # 用平均距离缩放世界bbox角点
         new_bbox_corners = new_bbox_corners / avg_scale.view(-1, 1, 1, 1)
         
+        #mask those batches that are bad
+        new_bbox_corners = new_bbox_corners.masked_fill(bad_batch.view(-1, 1, 1, 1), 0.0)
+        point_masks = point_masks.masked_fill(bad_batch.view(-1, 1, 1, 1), False)
         
         # 缩放相机外参的平移分量
         new_extrinsics[:, :, :3, 3] = new_extrinsics[:, :, :3, 3] / avg_scale.view(-1, 1, 1)
