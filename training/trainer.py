@@ -998,7 +998,7 @@ class Trainer:
         
         # Normalize camera extrinsics and points. The function returns new tensors.
         normalized_extrinsics, normalized_cam_points, normalized_world_points, normalized_depths, normalized_bbox_corners = \
-            normalize_camera_extrinsics_and_points_boxes_batch(
+        normalize_camera_extrinsics_and_points_boxes_batch(
                 extrinsics=batch["extrinsics"],
                 cam_points=batch["cam_points"],
                 world_points=batch["world_points"],
@@ -1040,7 +1040,7 @@ class Trainer:
     def _save_results(self, y_hat, val_flag=False):
         save_dict = {}
               
-        for key in ['images', 'seq_name', 'ids', 'extrinsics', 'intrinsics', 'pred_corners', 'pred_corners_g', 'pred_logits', 'pred_scores', 'pred_R', 'pred_center', 'pred_size']:
+        for key in ['images', 'seq_name', 'ids', 'extrinsics', 'intrinsics', 'pred_corners', 'pred_corners_g', 'pred_logits', 'pred_scores', 'pred_R', 'pred_R_g', 'pred_center', 'pred_center_g', 'pred_size', 'pred_size_g']:
             if key in y_hat:
                 value = y_hat[key][0]
                 # # 如果value有detach方法则说明是tensor，否则直接赋值

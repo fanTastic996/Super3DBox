@@ -19,7 +19,7 @@ from vggt.utils.pose_enc import extri_intri_to_pose_encoding, pose_encoding_to_e
 
 class VGGT(nn.Module, PyTorchModelHubMixin):
     def __init__(self, img_size=518, patch_size=14, embed_dim=1024,
-                 enable_camera=True, enable_gravity=True, enable_point=True, enable_depth=True, enable_track=True, enable_cubify=True):
+                 enable_camera=True, enable_gravity=True, enable_point=True, enable_depth=True, enable_track=True, enable_cubify=True, enable_depth_modality=True):
         super().__init__()
         self.patch_size = patch_size
         self.aggregator = Aggregator(img_size=img_size, patch_size=patch_size, embed_dim=embed_dim)
@@ -44,7 +44,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
             192: 3
         }
         cubify_embed_dim = 256
-        depth_model = False
+        depth_model = enable_depth_modality
         self.box_head = CubifyHead(
             backbone=Joiner(
                 backbone=ViT(
@@ -70,6 +70,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                     residual_block_indexes=[],
                     use_rel_pos=False,
                     out_feature="last_feat",
+                    depth_modality=depth_model,
                     depth_window_size=None,
                     layer_scale=not depth_model,
                     encoder_norm=not depth_model,
@@ -151,7 +152,8 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
             fusion_module=DeformableSrcFuseVggt(d_src=cubify_embed_dim, d_vggt=2048),
             pixel_mean=[123.675, 116.28, 103.53],
             pixel_std=[58.395, 57.12, 57.375],
-            topk_per_image=200) if enable_cubify else None
+            topk_per_image=200,
+            depth_model=depth_model) if enable_cubify else None
             #TODO: change 100->50
             
     def forward(self, images: torch.Tensor, intrinsics: torch.Tensor= None, extrinsics: torch.Tensor= None, query_points: torch.Tensor = None, inference_tag=False):
@@ -238,6 +240,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                 # else:
                 box_result = self.box_head(
                     images,
+                    depth,
                     (H_patch, W_patch),
                     aggregated_tokens_list,
                     patch_start_idx,

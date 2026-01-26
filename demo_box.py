@@ -17,6 +17,7 @@ dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.
 
 model = VGGT(enable_camera=True, enable_gravity=True, enable_point=False, enable_depth=True, enable_track=False, enable_cubify=True)
 # model = VGGT(enable_camera=True, enable_gravity=False, enable_point=False, enable_depth=False, enable_track=False, enable_cubify=True)
+# _URL = "/data1/lyq/logs/exp001/ckpts/checkpoint_250125_ca1m_depth_nomvf_5epoch.pt"
 _URL = "/data1/lyq/logs/exp001/ckpts/checkpoint.pt"
 # _URL = "/data1/lyq/logs/exp001/ckpts/checkpoint_3k_full_144.pt"
 # _URL = "/home/lanyuqing/myproject/vggt/training/logs/exp001/ckpts/checkpoint_45444750_180_200_gravity_query.pt"
@@ -27,12 +28,12 @@ model.load_state_dict(model_dict["model"])
 model.eval()
 model.to(device)
 
-data_root = '/data1/lyq/scannetpp'
-scene_id = '0a76e06478'
-
-# data_root = '/data1/lyq/CA1M-dataset/CA1M-dataset/training'
+# data_root = '/data1/lyq/scannetpp'
+# scene_id = '0a76e06478'
+# data_root = '/data1/lyq'
+data_root = '/data1/lyq/CA1M-dataset/CA1M-dataset/test'
 # scene_id = '42899112' #'47895364'
-# scene_id = '42446540'
+scene_id = '42897538'
 
 # scene_id = 'scacsd' #'47895364'
 # scene_id = '42444750' #'47332808'
@@ -42,10 +43,10 @@ scene_id = '0a76e06478'
 # image_names = ["/data1/lyq/70.JPG", "/data1/lyq/80.JPG", "/data1/lyq/85.JPG"]  
 
 # image_names = [f"{data_root}/{scene_id}/rgb/277.png", f"{data_root}/{scene_id}/rgb/287.png"]
-# image_names = [f"{data_root}/{scene_id}/rgb/520.png"]
+# image_names = [f"{data_root}/0.jpg", f"{data_root}/110.jpg", f"{data_root}/420.jpg"]
 # image_names = [f"{data_root}/{scene_id}/rgb/50.png", f"{data_root}/{scene_id}/rgb/70.png"]
-# image_names = [f"{data_root}/{scene_id}/rgb/320.png", f"{data_root}/{scene_id}/rgb/325.png"]
-image_names = [f"{data_root}/{scene_id}/1/31.JPG", f"{data_root}/{scene_id}/1/36.JPG",f"{data_root}/{scene_id}/1/41.JPG",f"{data_root}/{scene_id}/1/46.JPG"]
+image_names = [f"{data_root}/{scene_id}/rgb/620.png", f"{data_root}/{scene_id}/rgb/729.png", f"{data_root}/{scene_id}/rgb/810.png"]
+# image_names = [f"{data_root}/{scene_id}/1/31.JPG", f"{data_root}/{scene_id}/1/36.JPG",f"{data_root}/{scene_id}/1/41.JPG",f"{data_root}/{scene_id}/1/46.JPG"]
 
 # image_names = [f"{data_root}/{scene_id}/rgb/2.png", f"{data_root}/{scene_id}/rgb/219.png"]
 # image_names = [f"{data_root}/{scene_id}/rgb/0.png"] #219

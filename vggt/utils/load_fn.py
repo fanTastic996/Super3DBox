@@ -299,7 +299,7 @@ def load_and_preprocess_images_resize(image_path_list, mode="crop"):
         img = Image.open(image_path)
         
         #TODO: added 26-1-18 [1024, 768] -> [512, 384]
-        img = img.resize((img.size[0]//2, img.size[1]//2), Image.Resampling.BICUBIC)
+        # img = img.resize((img.size[0]//2, img.size[1]//2), Image.Resampling.BICUBIC)
         
         
         # If there's an alpha channel, blend onto white background:
