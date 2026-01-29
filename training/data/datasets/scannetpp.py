@@ -13,7 +13,7 @@ import logging
 import cv2
 import random
 import numpy as np
-
+from cubifyanything.sensor import *
 
 from data.dataset_util import *
 from data.base_dataset import BaseDataset
@@ -21,14 +21,43 @@ import torch
 import open3d as o3d
 from scipy.spatial import KDTree
 from vggt.utils.rotation import mat_to_quat, quat_to_mat
+from scipy.spatial.transform import Rotation
+from cubifyanything.boxes import DepthInstance3DBoxes
+from enum import Enum
+from cubifyanything.orientation import ImageOrientation, rotate_tensor, ROT_Z
+
+
+def get_camera_to_gravity_transform(pose, current, target=ImageOrientation.UPRIGHT):
+    z_rot_4x4 = torch.eye(4).float()
+    key = (current, target)
+    z_rot_4x4[:3, :3] = ROT_Z[(current, target)]
+    pose = pose @ torch.linalg.inv(z_rot_4x4.to(pose))
+
+    # This is somewhat lazy.
+    fake_corners = DepthInstance3DBoxes(
+        np.array([[0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0]])).corners[:, [1, 5, 4, 0, 2, 6, 7, 3]]
+    fake_corners = torch.cat((fake_corners, torch.ones_like(fake_corners[..., :1])), dim=-1).to(pose)
+
+    fake_corners = (torch.linalg.inv(pose) @ fake_corners.permute(0, 2, 1)).permute(0, 2, 1)[..., :3]
+    fake_basis = torch.stack([
+        (fake_corners[:, 1] - fake_corners[:, 0]) / torch.linalg.norm(fake_corners[:, 1] - fake_corners[:, 0], dim=-1)[:, None],
+        (fake_corners[:, 3] - fake_corners[:, 0]) / torch.linalg.norm(fake_corners[:, 3] - fake_corners[:, 0], dim=-1)[:, None],
+        (fake_corners[:, 4] - fake_corners[:, 0]) / torch.linalg.norm(fake_corners[:, 4] - fake_corners[:, 0], dim=-1)[:, None],
+    ], dim=1).permute(0, 2, 1)
+
+    # this gets applied _after_ predictions to put it in camera space.
+    T = Rotation.from_euler("xz", Rotation.from_matrix(fake_basis[-1].cpu().numpy()).as_euler("yxz")[1:]).as_matrix()
+
+    return torch.tensor(T).to(pose)
+
 
 class scannetppDataset(BaseDataset):
     def __init__(
         self,
         common_conf, # 通用配置参数
         split: str = "train", # 数据集分割（训练集/测试集）
-        CA1M_DIR: str = None, # CA1M数据集根目录路径
-        CA1M_ANNOTATION_DIR: str = None, # CA1M标注文件目录路径
+        SCPP_DIR: str = None, # CA1M数据集根目录路径
+        SCPP_ANNOTATION_DIR: str = None, # CA1M标注文件目录路径
         min_num_images: int = 50, # 24 序列最小图像数量要求
         len_train: int = 100000, # 训练集长度
         len_test: int = 10000, # 测试集长度
@@ -56,7 +85,7 @@ class scannetppDataset(BaseDataset):
         self.inside_random = common_conf.inside_random  # 内部随机选择序列
         self.allow_duplicate_img = common_conf.allow_duplicate_img # 允许重复图像
 
-        if CA1M_DIR is None or CA1M_ANNOTATION_DIR is None:
+        if SCPP_DIR is None or SCPP_ANNOTATION_DIR is None:
             raise ValueError("Both CA1M_DIR and CA1M_ANNOTATION_DIR must be specified.")
 
  
@@ -78,17 +107,17 @@ class scannetppDataset(BaseDataset):
         self.seqlen = None  
         self.min_num_images = min_num_images # 序列最小图像数
         # 记录数据集目录信息
-        logging.info(f"CA1M_DIR is {CA1M_DIR}")
+        logging.info(f"SCPP_DIR is {SCPP_DIR}")
         # 存储路径
-        self.CA1M_DIR = CA1M_DIR
-        self.CA1M_ANNOTATION_DIR = CA1M_ANNOTATION_DIR
+        self.SCPP_DIR = SCPP_DIR
+        self.SCPP_ANNOTATION_DIR = SCPP_ANNOTATION_DIR
 
         total_frame_num = 0
         # 遍历所有序列，拿到每个序列的图像数据信息，存到self.data_store中
         for split_name in split_name_list: #["test", "train"]
             # 构建标注文件路径
             annotation_file = osp.join(
-                self.CA1M_ANNOTATION_DIR, f"{split_name}_list.txt"
+                self.SCPP_ANNOTATION_DIR, f"{split_name}.txt"
             )
             try:
                 seq_list = np.loadtxt(annotation_file, dtype=str)
@@ -99,7 +128,7 @@ class scannetppDataset(BaseDataset):
             print(annotation_file, "seq_list length", len(seq_list))
             for seq_name in seq_list:
                 
-                seq_dir = osp.join(self.CA1M_DIR, seq_name)
+                seq_dir = osp.join(self.SCPP_DIR, seq_name, seq_name, seq_name)
                 if not os.path.exists(seq_dir):
                     continue
                 seq_rgb_dir = osp.join(seq_dir, 'rgb')
@@ -119,8 +148,8 @@ class scannetppDataset(BaseDataset):
         self.total_frame_num = total_frame_num
         # 记录数据集统计信息
         status = "Training" if self.training else "Testing"
-        logging.info(f"{status}: CA1M Data size: {self.sequence_list_len}")
-        logging.info(f"{status}: CA1M Data dataset length: {self.total_frame_num}")
+        logging.info(f"{status}: SCPP Data size: {self.sequence_list_len}")
+        logging.info(f"{status}: SCPP Data dataset length: {self.total_frame_num}")
         
         
     def get_data(
@@ -159,7 +188,7 @@ class scannetppDataset(BaseDataset):
             # ids = np.random.choice(
             #     self.data_store[seq_name], img_per_seq, replace=self.allow_duplicate_img
             # )
-            # ids = np.array([0, 100])
+            ids = np.array([0,10])
             # ids = np.array([225, 240])
             # ids = np.array([460, 520])
             # ids = np.array([520])
@@ -175,24 +204,25 @@ class scannetppDataset(BaseDataset):
             # ids = np.array([start_idx + i * interval for i in range(img_per_seq)])
             # np.random.shuffle(ids) #打乱顺序
             
-            interval = np.random.randint(5,10)
-            total = int(self.data_store[seq_name])  # 序列总帧数（假设表示帧数量）
+            ###################################
+            # interval = np.random.randint(5,10)
+            # total = int(self.data_store[seq_name])  # 序列总帧数（假设表示帧数量）
 
-            need = (img_per_seq - 1) * interval + 1
+            # need = (img_per_seq - 1) * interval + 1
 
-            if total >= need:
-                # 原逻辑：按固定 interval 抽
-                max_start = total - need
-                start_idx = np.random.randint(0, max_start + 1) if max_start > 0 else 0
-                ids = start_idx + np.arange(img_per_seq) * interval
-            else:
-                # 不够用 interval=10：改为在 [0, total-1] 上等间隔取 img_per_seq 个
-                ids = np.linspace(0, total - 1, num=img_per_seq)
-                ids = np.round(ids).astype(np.int64)
+            # if total >= need:
+            #     # 原逻辑：按固定 interval 抽
+            #     max_start = total - need
+            #     start_idx = np.random.randint(0, max_start + 1) if max_start > 0 else 0
+            #     ids = start_idx + np.arange(img_per_seq) * interval
+            # else:
+            #     # 不够用 interval=10：改为在 [0, total-1] 上等间隔取 img_per_seq 个
+            #     ids = np.linspace(0, total - 1, num=img_per_seq)
+            #     ids = np.round(ids).astype(np.int64)
             
         image_idxs = ids  # 获取图像ID
         #TODO:
-        # seq_name = '42444750'
+        seq_name = '0a184cf634'
         
         
         # print("Seq", seq_name,'ids', ids) 
@@ -222,17 +252,18 @@ class scannetppDataset(BaseDataset):
         
         seq_poses = scene_data['poses'].reshape(-1, 4, 4)  # 获 取序列位姿
         #TODO: seems right, not sure 25-8-28
-        seq_poses = closed_form_inverse_se3(seq_poses).reshape(-1, 4, 4)
+        # DO NOT USE THIS to calculate gravity, it's wrong
+        # seq_poses = closed_form_inverse_se3(seq_poses).reshape(-1, 4, 4)
         
-        json_directory = osp.join(self.CA1M_DIR, seq_name, 'instances')
+        # json_directory = osp.join(self.CA1M_DIR, seq_name, 'instances')
         K_rgb = scene_data['K'] #scene_data['K_rgb']
-        seq_gravity = scene_data['gravity']
+        # seq_gravity = scene_data['gravity']
          
         for img_idx in image_idxs:
             
             filepath = osp.join(seq_name,'rgb',str(img_idx)+'.png') 
             # 获取图像路径
-            image_path = osp.join(self.CA1M_DIR, seq_name,'rgb',str(img_idx)+'.png') 
+            image_path = osp.join(self.SCPP_DIR, seq_name, seq_name, seq_name,'rgb',str(img_idx)+'.JPG') 
             # 读取图像
             image = read_image_cv2(image_path)
             # 如果需要加载深度图
@@ -240,6 +271,7 @@ class scannetppDataset(BaseDataset):
             # self.load_depth = False # set by lyq
             if self.load_depth: #True
                 depth_path = image_path.replace("/rgb", "/depth")
+                depth_path = depth_path.replace("JPG", "png")
                 # 读取深度图
                 depth_map = read_depth(depth_path, 0.001) # 1.0
                 # 构建掩码路径
@@ -268,6 +300,18 @@ class scannetppDataset(BaseDataset):
             cur_pose = seq_poses[img_idx] # [4,4]
             extri_opencv = cur_pose[:3,:] # np.array(anno["extri"])
             intri_opencv = K_rgb # np.array(anno["intri"])
+            
+            
+            RT = torch.from_numpy(cur_pose.astype(np.float32).reshape((4, 4)))
+            # print('img path',image_path)
+            # print("RT", RT)
+            wide = PosedSensorInfo()    
+            wide.RT = RT[None]
+            current_orientation = wide.orientation
+            target_orientation = ImageOrientation.UPRIGHT
+
+            T_gravity = get_camera_to_gravity_transform(wide.RT[-1], current_orientation, target=target_orientation)
+
             
             (
                 image,
@@ -304,7 +348,7 @@ class scannetppDataset(BaseDataset):
             point_masks.append(point_mask) # [H,W]
             image_paths.append(image_path) # [H,W]
             original_sizes.append(original_size)
-            all_gravity.append(seq_gravity[img_idx])
+            all_gravity.append(T_gravity)
 
         
         '''
@@ -334,7 +378,7 @@ class scannetppDataset(BaseDataset):
         # filtered_bbox_corners, _, _, ratio = filter_gt_boxes_by_2d_valid_area_ratio_np(filtered_bbox_corners, np.stack(intrinsics, axis=0), extrinsics_tmp, H=images[0].shape[0], W=images[0].shape[1], thr=0.2, extrinsic_is_c2w=False, return_debug=True)
         
         
-        corners_cam_list = load_gt_corners_cam_multiframe(json_directory, image_idxs,json_name_fmt="{idx}.json", device="cpu")
+        # corners_cam_list = load_gt_corners_cam_multiframe(json_directory, image_idxs,json_name_fmt="{idx}.json", device="cpu")
         
         
         # 使用空的GT boxes
@@ -342,11 +386,11 @@ class scannetppDataset(BaseDataset):
         # filtered_bbox_corners, tilted_mask, tilt_degs = self.upright_boxes(filtered_bbox_corners, tilt_deg_thresh=5.0)
         
         # padding invalid boxes
-        for i in range(len(corners_cam_list)):
-            if isinstance(corners_cam_list[i], tuple):
-                print(f"No valid GT boxes found for seq {seq_name} with image ids {ids}. using fake GT...")
-                corners_cam_list[i] = np.zeros((1, 8, 3), dtype=np.float32) 
-            corners_cam_list[i] = self.process_bbox_corners(corners_cam_list[i])
+        # for i in range(len(corners_cam_list)):
+        #     if isinstance(corners_cam_list[i], tuple):
+        #         print(f"No valid GT boxes found for seq {seq_name} with image ids {ids}. using fake GT...")
+        corners_cam_list = np.zeros((500, 8, 3), dtype=np.float32) 
+
         # bbox_corners = self.process_bbox_corners(filtered_bbox_corners)  # 处理边界框角点
         corners_cam_list = np.stack(corners_cam_list, axis=0).reshape(-1, 8, 3)
 
@@ -409,23 +453,22 @@ class scannetppDataset(BaseDataset):
     
     def load_scene_data(self, scene_id):
         """加载场景数据"""
-        scene_path = os.path.join(self.CA1M_DIR, scene_id)
+        scene_path = os.path.join(self.SCPP_DIR, scene_id, scene_id, scene_id)
 
         # 加载GT instances
-        instances_path = os.path.join(scene_path, 'instances.json')
-        with open(instances_path, 'r') as f:
-            instances_data = json.load(f)
+        # instances_path = os.path.join(scene_path, 'instances.json')
+        # with open(instances_path, 'r') as f:
+        #     instances_data = json.load(f)
 
         # 验证并提取有效的corners数据
-        corners_array, valid_instances = self.validate_and_extract_corners(instances_data)
+        # corners_array, valid_instances = self.validate_and_extract_corners(instances_data)
+        corners_array = np.load(os.path.join(scene_path, 'all_bboxes.npy'))
         
-        gravity = np.load(os.path.join(scene_path, 'T_gravity.npy'))
+        # gravity = np.load(os.path.join(scene_path, 'T_gravity.npy'))
 
         # 加载相机参数和poses
-        K = np.loadtxt(os.path.join(scene_path, 'K_depth.txt')).reshape(3, 3)
-        K_rgb = np.loadtxt(os.path.join(scene_path, 'K_rgb.txt')).reshape(3, 3)
+        K = np.loadtxt(os.path.join(scene_path, 'K.txt')).reshape(3, 3)
         poses = np.load(os.path.join(scene_path, 'all_poses.npy'))
-
         # 加载深度图列表并获取标准尺寸
         depth_path = os.path.join(scene_path, 'depth')
         num_images = len([f for f in os.listdir(depth_path) if f.endswith('.png')])
@@ -436,15 +479,13 @@ class scannetppDataset(BaseDataset):
             num_images = min(len(poses), num_images)
 
         return {
-            'instances': valid_instances,  # 使用验证后的instances
             'corners_array': corners_array,  # 预处理的corners数组
             'K': K,
-            'K_rgb': K_rgb,  # 假设K_rgb与K相同
             'poses': poses,
             'num_images': num_images,
             'depth_path': depth_path,
             'scene_path': scene_path,
-            'gravity': gravity
+            # 'gravity': gravity
         }
     
     def validate_and_extract_corners(self, instances_data):

@@ -467,6 +467,7 @@ class CubifyHead(nn.Module):
         self.topk_per_image = topk_per_image
         
         is_depth_model = depth_model
+        self.is_depth_model = is_depth_model
         self.augmentor = Augmentor(("wide/image", "wide/depth") if is_depth_model else ("wide/image",))
         self.preprocessor = Preprocessor()
         
@@ -482,19 +483,22 @@ class CubifyHead(nn.Module):
             K=torch.tensor([[573.6569,   0.0000, 259.0],
          [  0.0000, 575.0908, 259.0],
          [  0.0000,   0.0000,   1.0000]])[None])
-        depth_info = DepthMeasurementInfo(
-            size=(518, 518), # H W
-            # size=(1024, 768), # work
-            K=torch.tensor([[573.6569,   0.0000, 259.0],
-         [  0.0000, 575.0908, 259.0],
-         [  0.0000,   0.0000,   1.0000]])[None])
+        if self.is_depth_model:
+            depth_info = DepthMeasurementInfo(
+                size=(518, 518), # H W
+                # size=(1024, 768), # work
+                K=torch.tensor([[573.6569,   0.0000, 259.0],
+            [  0.0000, 575.0908, 259.0],
+            [  0.0000,   0.0000,   1.0000]])[None])
         
         
         wide.image = image_info
-        wide.depth = depth_info
+        if self.is_depth_model: 
+            wide.depth = depth_info
         new_size = (int(wide.image.size[0] ), int(wide.image.size[1] ))
         wide.image = wide.image.resize(new_size)
-        wide.depth = wide.depth.resize(new_size)
+        if self.is_depth_model:
+            wide.depth = wide.depth.resize(new_size)
         wide.RT = torch.eye(4)[None]
         current_orientation = wide.orientation
         target_orientation = ImageOrientation.UPRIGHT
@@ -585,7 +589,11 @@ class CubifyHead(nn.Module):
 
         for j in range(N_batch): # 一个个batch轮流来，因为cubify不支持
         #     # 1.gravity 特征提取（主干网络）
-            sample = {"wide": {'image': vggt_images[j],'depth': depths[j].squeeze(-1)},
+            if self.is_depth_model:
+                sample = {"wide": {'image': vggt_images[j],'depth': depths[j].squeeze(-1)},
+                      "sensor_info": self.sensor_info}
+            else:
+                sample = {"wide": {'image': vggt_images[j]},
                       "sensor_info": self.sensor_info}
             
             sample["wide"]['image'] = (sample["wide"]['image'] * 255.).to(torch.uint8)
@@ -593,8 +601,9 @@ class CubifyHead(nn.Module):
             if intrinsic is not None and extrinsic is not None:
                 sample["sensor_info"].wide.image = sample["sensor_info"].wide.image.resize((img_H, img_W))  #TODO: changed img_H, img_W
                 sample["sensor_info"].wide.image.K[0,:3,:3] = intrinsic[j,0].detach().cpu()[:3,:3]
-                sample["sensor_info"].wide.depth = sample["sensor_info"].wide.depth.resize((img_H, img_W))  #TODO: changed img_H, img_W
-                sample["sensor_info"].wide.depth.K[0,:3,:3] = intrinsic[j,0].detach().cpu()[:3,:3]
+                if self.is_depth_model:
+                    sample["sensor_info"].wide.depth = sample["sensor_info"].wide.depth.resize((img_H, img_W))  #TODO: changed img_H, img_W
+                    sample["sensor_info"].wide.depth.K[0,:3,:3] = intrinsic[j,0].detach().cpu()[:3,:3]
             
             # GT T_gravity
             # sample["sensor_info"].wide.T_gravity = gravity[j]
@@ -609,10 +618,12 @@ class CubifyHead(nn.Module):
         sensor = batched_sensors[self.sensor_name]   
         if len(sensor['image'].data.tensor.shape) > 4:
             sensor['image'].data.tensor = sensor['image'].data.tensor.squeeze(0) 
-            sensor['depth'].data.tensor = sensor['depth'].data.tensor.squeeze(0) 
+            if self.is_depth_model:
+                sensor['depth'].data.tensor = sensor['depth'].data.tensor.squeeze(0) 
         if len(sensor['image'].data.tensor.shape) > 4:
             sensor['image'].data.tensor = sensor['image'].data.tensor.view(N_batch*N_img, 3, sensor['image'].data.tensor.shape[-2], sensor['image'].data.tensor.shape[-1])
-            sensor['depth'].data.tensor = sensor['depth'].data.tensor.view(N_batch*N_img, sensor['depth'].data.tensor.shape[-2], sensor['depth'].data.tensor.shape[-1])
+            if self.is_depth_model:
+                sensor['depth'].data.tensor = sensor['depth'].data.tensor.view(N_batch*N_img, sensor['depth'].data.tensor.shape[-2], sensor['depth'].data.tensor.shape[-1])
         
         #TODO:
         '''
@@ -621,7 +632,8 @@ class CubifyHead(nn.Module):
         sensor['image'].sensor[index].image是一个ImageMeasurementInfo,需要将该变量的.K更改为每张图的实际内参[1,3,3]
         '''
         sensor['image'].data.image_sizes = sensor['image'].data.image_sizes * N_img #不确定这里要不要乘batch
-        sensor['depth'].data.image_sizes = sensor['image'].data.image_sizes * N_img
+        if self.is_depth_model:
+            sensor['depth'].data.image_sizes = sensor['image'].data.image_sizes * N_img
         # base_sensor = sensor["image"].sensor[0]
         # for j in range(N_batch):
         #     sensor["image"].sensor[j].RT = sensor["image"].sensor[j].RT.repeat(N_img,1,1)
