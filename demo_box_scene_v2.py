@@ -66,7 +66,7 @@ for json_path in json_paths:
         # images = load_and_preprocess_images_resize(image_names).to(device)
         print("images", images.shape, torch.max(images), torch.min(images))
 
-        # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+         >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
         K=np.loadtxt(f"{data_root}/{scene_id}/K_depth.txt").reshape(3,3)
         all_poses = np.load(f"{data_root}/{scene_id}/all_poses.npy").reshape(-1, 4, 4)
         # gt_data = load_gt_data(f"{data_root}/{scene_id}", depth_path_list)

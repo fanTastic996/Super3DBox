@@ -500,8 +500,10 @@ import os
 
 
 
-scannet_train = '/data1/lyq/scannetpp_train'
+# scannet_train = '/data1/lyq/scannetpp_train'
 
-A = os.listdir(scannet_train)
-for seq in A:
-    print(seq)
+# A = os.listdir(scannet_train)
+# for seq in A:
+#     print(seq)
+
+

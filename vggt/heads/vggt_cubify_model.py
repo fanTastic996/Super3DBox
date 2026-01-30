@@ -1197,7 +1197,7 @@ class PromptDecoder(nn.Module):
                 src_padding_mask,
                 prompts.self_attn_mask,
                 box_attn_prior_mask=prompts.box_attn_prior_mask,
-                vHW_patch=(vHW_patch[0], vHW_patch[1])
+                # vHW_patch=(vHW_patch[0], vHW_patch[1])
             )
             # B, N_queries, C=256
             output_after_norm = self.norm(output)

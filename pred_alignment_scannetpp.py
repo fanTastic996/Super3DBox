@@ -610,40 +610,16 @@ def main():
     args = ap.parse_args()
     
     
-    scenes = [
-    "42446540", "42897501", "42897521", "42897538", "42897545",
-    "42897552", "42897561", "42897599", "42897647", "42897688",
-    "42897692", "42898486", "42898521", "42898538", "42898570",
-    "42898811", "42898849", "42898867", "42899459", "42899611",
-    "42899617", "42899679", "42899691", "42899698", "42899712",
-    "42899725", "42899729", "42899736",
-    "43896260", "43896321", "43896330",
-    "44358442", "44358451",
-    "45260854", "45260898", "45260903", "45260920",
-    "45261121", "45261133", "45261143", "45261179",
-    "45261575", "45261587", "45261615", "45261631",
-    "45662921", "45662942", "45662970", "45662981",
-    "45663113", "45663149", "45663164",
-    "47115452", "47115469", "47115525", "47115543",
-    "47204552", "47204559", "47204573", "47204605",
-    "47331068", "47331262", "47331311", "47331319",
-    "47331651", "47331661", "47331963", "47331971",
-    "47331988", "47332000", "47332885", "47332893",
-    "47332915", "47333431", "47333440", "47333452",
-    "47333898", "47333916", "47333923", "47333927",
-    "47333934", "47334107", "47334115", "47334234",
-    "47334239", "47334256",
-    "47430475", "47430485",
-    "47895341", "47895364", "47895534", "47895542", "47895552",
-    "48018345", "48018367", "48018375", "48018382",
-    "48018559", "48018566",
-    "48018730", "48018737", "48018947",
-    "48458415", "48458427", "48458481", "48458647", "48458654",
+    scenes =[
+        "28a9ee4557", "286b55a2bf", "260fa55d50", "21d970d8de", "210f741378",
+        "1d003b07bd", "1b75758486", "1ae9e5d2a6", "1841a0b525", "16c9bd2e1e",
+        "1204e08f17", "116456116b", "0b031f3119", "09bced689e", "08bbbdcc3d",
+        "07ff1c45bb", "079a326597", "0a7cc12c0e", "0a76e06478", "0a184cf634"
     ]
     # scenes = ['43896260']
     import os
     for seq in scenes:
-        for i in range(2):
+        for i in range(4):
             
             # if i != 1:
                 # continue
@@ -696,29 +672,29 @@ def main():
             
             # option 2
             # 估计法向量（半径一般取 2~3 倍 voxel）
-            radius = 0.02 * 3.0
-            pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=radius, max_nn=30))
-            pcd_gt.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=radius, max_nn=30))
+            # radius = 0.02 * 3.0
+            # pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=radius, max_nn=30))
+            # pcd_gt.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=radius, max_nn=30))
 
-            init_T = np.eye(4)
-            max_corr = 0.02 * 3.0
+            # init_T = np.eye(4)
+            # max_corr = 0.02 * 3.0
 
-            reg_p2p = o3d.pipelines.registration.registration_icp(
-                pcd, pcd_gt,
-                max_corr, init_T,
-                o3d.pipelines.registration.TransformationEstimationPointToPlane(),
-                o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=50)
-            )
-            transformation = reg_p2p.transformation
-            pcd = pcd.transform(transformation)
+            # reg_p2p = o3d.pipelines.registration.registration_icp(
+            #     pcd, pcd_gt,
+            #     max_corr, init_T,
+            #     o3d.pipelines.registration.TransformationEstimationPointToPlane(),
+            #     o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=50)
+            # )
+            # transformation = reg_p2p.transformation
+            # pcd = pcd.transform(transformation)
             
             pcd_other = apply_sim3_to_pcd(pcd_other, c, R, t)
-            # 检查 ICP transform 的平移距离，如果超过 5m 则不应用
-            translation = transformation[0:3, 3]
-            translation_distance = np.linalg.norm(translation)
-            if translation_distance <= 5.0:
-                pcd_other.transform(transformation)
-                pred_box_ue = apply_se3_to_corners(pred_box_ue, reg_p2p.transformation)
+            # # 检查 ICP transform 的平移距离，如果超过 5m 则不应用
+            # translation = transformation[0:3, 3]
+            # translation_distance = np.linalg.norm(translation)
+            # if translation_distance <= 5.0:
+            #     pcd_other.transform(transformation)
+            #     pred_box_ue = apply_se3_to_corners(pred_box_ue, reg_p2p.transformation)
 
             save_ply_path = os.path.join(args.pred_root, 'ply', seq + '_' + str(i) + '_ours_scene_aligned.ply')
             print('save_ply_path', save_ply_path)
@@ -733,7 +709,6 @@ def main():
             pred_box_ue = pred_box_ue[box_mask]
 
 
-            
             # keep = obb_nms_corners_sizeaware(all_corners, all_scores, all_sizes, iou_thresh=0.1, size_ratio_thresh=1.25)  # keep 是 index 列表
             keep, iou_mat = obb_nms_corners_sizeaware_v2(
                                 pred_box_ue, all_scores, all_sizes,
@@ -751,10 +726,17 @@ def main():
             boxes3d_to_ply(pred_box_ue, os.path.join(box_dir, seq+"_"+str(i)+'_bboxes_aligned.ply'))
             np.save(os.path.join(os.path.join(box_dir, seq+"_"+str(i)+'_bboxes_aligned.npy')), pred_box_ue)
     
-
-
-
-
+            #save final pkl
+            final_pkl_path = os.path.join(args.pred_root, 'pkl', seq+"_"+str(i)+'_pred.pkl')
+            with open(final_pkl_path, 'rb') as f:
+                final_pred_data = pickle.load(f)
+            final_box_corners = final_pred_data['corners']
+            final_box_corners = c * np.einsum('nkj,ij->nki', final_box_corners, R) + t
+            final_pred_data['corners'] = final_box_corners
+            final_pkl_path = final_pkl_path.replace('_pred', '_pred_aligned.pkl')
+            with open(final_pkl_path, 'wb') as f:
+                pickle.dump(final_pred_data, f)
+            print(f'saved final pkl to {final_pkl_path}')
 
 
 if __name__ == "__main__":
@@ -762,5 +744,5 @@ if __name__ == "__main__":
 
 
 '''
-python pred_alignment_ca1m.py   --pred_root /data1/lyq/CA1M_results_rgb/  --pred_gt_root /data1/lyq/CA1M_results_rgb/gt_data/ --box_threshold 0.8
+CUDA_VISIBLE_DEVICES=3 python pred_alignment_scannetpp.py   --pred_root /data1/lyq/scannetpp_results/  --pred_gt_root /data1/lyq/scannetpp_results/gt_data/ --box_threshold 0.3
 '''

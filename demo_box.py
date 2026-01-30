@@ -18,7 +18,11 @@ dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.
 model = VGGT(enable_camera=True, enable_gravity=True, enable_point=False, enable_depth=True, enable_track=False, enable_cubify=True,enable_depth_modality=False)
 # model = VGGT(enable_camera=True, enable_gravity=False, enable_point=False, enable_depth=False, enable_track=False, enable_cubify=True)
 # _URL = "/data1/lyq/logs/exp001/ckpts/checkpoint_3k_new_mvf_depthmode_33epoch.pt"
-_URL = "/data1/lyq/logs/exp001/ckpts/checkpoint.pt"
+_URL = "/data1/lyq/logs/exp001/ckpts/checkpoint_3k_new_mvf_rgbmode_40epoch_Grefine.pt"
+# _URL = "/data1/lyq/logs/exp001/ckpts/checkpoint_3k_new_mvf_rgbmode_40epoch.pt"
+# _URL = "/data1/lyq/logs/exp001/ckpts/checkpoint_3k_new_mvf_depthmode_33epoch.pt"
+# _URL = "/data1/lyq/logs/exp001/ckpts/checkpoint_250125_ca1m_depth_nomvf_5epoch_depthmode.pt"
+
 # _URL = "/data1/lyq/logs/exp001/ckpts/checkpoint_3k_full_144.pt"
 # _URL = "/home/lanyuqing/myproject/vggt/training/logs/exp001/ckpts/checkpoint_45444750_180_200_gravity_query.pt"
 model_dict= torch.load(_URL)
@@ -30,25 +34,30 @@ model.to(device)
 
 # data_root = '/data1/lyq/scannetpp'
 # scene_id = '0a76e06478'
-# scene_id = '1f7cbbdde1'
-# data_root = '/data1/lyq'
-data_root = '/data1/lyq/CA1M-dataset/CA1M-dataset/test'
-# scene_id = '42899112' #'47895364'
-scene_id = '42446540'
+# scene_id = '1ae9e5d2a6'
+data_root = '/data1/lyq/iphone'
+# data_root = '/data1/lyq/CA1M-dataset/CA1M-dataset/test'
+scene_id = '036bce3393' #'101_2' #'036bce3393'#'fr1_desk' #'building2' #'room0' #'scene0000' #'47895364'
+# scene_id = '42446540'
 
 # scene_id = 'scacsd' #'47895364'
 # scene_id = '42444750' #'47332808'
 # Load and preprocess example images (replace with your own image paths) 
 # scene_id = '47334115'
 # image_names = [f"{data_root}/{scene_id}/rgb/83.png", f"{data_root}/{scene_id}/rgb/93.png", f"{data_root}/{scene_id}/rgb/103.png",  f"{data_root}/{scene_id}/rgb/113.png"]  
-# image_names = ["/data1/lyq/70.JPG", "/data1/lyq/80.JPG", "/data1/lyq/85.JPG"]  
+# image_names = ["/data1/lyq/100.jpg", "/data1/lyq/120.jpg", "/data1/lyq/140.jpg"]  
+# image_names = ["/data1/lyq/11.png", "/data1/lyq/21.png","/data1/lyq/31.png"]  
 
 # image_names = [f"{data_root}/{scene_id}/rgb/277.png", f"{data_root}/{scene_id}/rgb/287.png"]
-# image_names = [f"{data_root}/0.jpg", f"{data_root}/110.jpg", f"{data_root}/420.jpg"]
+# image_names = [f"{data_root}/1000.jpg", f"{data_root}/2000.jpg", f"{data_root}/3000.jpg"]
+# image_names = [f"{data_root}/5000.jpg", f"{data_root}/6000.jpg", f"{data_root}/7000.jpg",f"{data_root}/8000.jpg"]
+image_names = [f"{data_root}/0.jpg", f"{data_root}/1.jpg"]
 # image_names = [f"{data_root}/{scene_id}/rgb/50.png", f"{data_root}/{scene_id}/rgb/70.png"]
-image_names = [f"{data_root}/{scene_id}/rgb/185.png", f"{data_root}/{scene_id}/rgb/230.png", f"{data_root}/{scene_id}/rgb/455.png"]
+# image_names = [f"{data_root}/{scene_id}/rgb/185.png", f"{data_root}/{scene_id}/rgb/230.png", f"{data_root}/{scene_id}/rgb/455.png"]
 # image_names = [f"{data_root}/{scene_id}/1/31.JPG", f"{data_root}/{scene_id}/1/36.JPG",f"{data_root}/{scene_id}/1/41.JPG",f"{data_root}/{scene_id}/1/46.JPG"]
-# image_names = [f"{data_root}/{scene_id}/1/306.JPG", f"{data_root}/{scene_id}/1/311.JPG",f"{data_root}/{scene_id}/1/321.JPG",f"{data_root}/{scene_id}/1/326.JPG"]
+# image_names = [f"{data_root}/{scene_id}/2/140.JPG", f"{data_root}/{scene_id}/2/145.JPG"]
+
+# image_names = [f"{data_root}/{scene_id}/2/140.JPG", f"{data_root}/{scene_id}/2/145.JPG",f"{data_root}/{scene_id}/2/150.JPG",f"{data_root}/{scene_id}/2/155.JPG",f"{data_root}/{scene_id}/2/160.JPG",f"{data_root}/{scene_id}/2/165.JPG",f"{data_root}/{scene_id}/2/170.JPG",f"{data_root}/{scene_id}/2/175.JPG"]
 # image_names = [f"{data_root}/{scene_id}/1/306.JPG"]
 
 # image_names = [f"{data_root}/{scene_id}/rgb/2.png", f"{data_root}/{scene_id}/rgb/219.png"]
