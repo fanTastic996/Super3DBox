@@ -10,11 +10,16 @@ from PIL import Image
 import argparse
 import json
 
+
+'''
+CUDA_VISIBLE_DEVICES=3 python demo_box_scene_v2.py --overwrite
+'''
+
 parser = argparse.ArgumentParser(description="IGGT Scene Processor")
-parser.add_argument('--model_path', type=str, default="/data1/lyq/logs/exp001/ckpts/checkpoint_250125_ca1m_depth_nomvf_5epoch_rgbmode.pt", help='Path to model checkpoint')
+parser.add_argument('--model_path', type=str, default="/data1/lyq/logs/exp001/ckpts/checkpoint.pt", help='Path to model checkpoint')
 parser.add_argument('--json_dir', type=str, default="/data1/lyq/CA-1M-benchmark", help='Input directory path')
 parser.add_argument('--data_root', type=str, default="/data1/lyq/CA1M-dataset/CA1M-dataset/test", help='Input directory path')
-parser.add_argument('--save_dir', type=str, default="/data1/lyq/CA1M_results", help='Output directory path')
+parser.add_argument('--save_dir', type=str, default="/data1/lyq/CA1M_results_rgb_nomvf_no2d3dfusion", help='Output directory path')
 parser.add_argument('--overwrite', action='store_true', help='Overwrite existing predictions')
 parser.add_argument(
     "--conf_threshold", type=float, default=25.0, help="Initial percentage of low-confidence points to filter out"
@@ -66,7 +71,7 @@ for json_path in json_paths:
         # images = load_and_preprocess_images_resize(image_names).to(device)
         print("images", images.shape, torch.max(images), torch.min(images))
 
-         >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
         K=np.loadtxt(f"{data_root}/{scene_id}/K_depth.txt").reshape(3,3)
         all_poses = np.load(f"{data_root}/{scene_id}/all_poses.npy").reshape(-1, 4, 4)
         # gt_data = load_gt_data(f"{data_root}/{scene_id}", depth_path_list)

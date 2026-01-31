@@ -663,12 +663,12 @@ def main():
 
             pred_box_ue = c * np.einsum('nkj,ij->nki', pred_box, R) + t   # [N,8,3]
             
-            import os 
-            pcd = o3d.geometry.PointCloud()
-            pcd.points = o3d.utility.Vector3dVector(pred_pts)
+            # import os 
+            # pcd = o3d.geometry.PointCloud()
+            # pcd.points = o3d.utility.Vector3dVector(pred_pts)
             
-            pcd_gt = o3d.geometry.PointCloud()
-            pcd_gt.points = o3d.utility.Vector3dVector(gt_pts)
+            # pcd_gt = o3d.geometry.PointCloud()
+            # pcd_gt.points = o3d.utility.Vector3dVector(gt_pts)
             
             # option 2
             # 估计法向量（半径一般取 2~3 倍 voxel）
@@ -696,9 +696,11 @@ def main():
             #     pcd_other.transform(transformation)
             #     pred_box_ue = apply_se3_to_corners(pred_box_ue, reg_p2p.transformation)
 
-            save_ply_path = os.path.join(args.pred_root, 'ply', seq + '_' + str(i) + '_ours_scene_aligned.ply')
-            print('save_ply_path', save_ply_path)
-            ok = o3d.io.write_point_cloud(save_ply_path, pcd_other)
+
+            #TODO:save aligned pcd of pred_pts once is enough
+            # save_ply_path = os.path.join(args.pred_root, 'ply', seq + '_' + str(i) + '_ours_scene_aligned.ply')
+            # print('save_ply_path', save_ply_path)
+            # ok = o3d.io.write_point_cloud(save_ply_path, pcd_other)
 
             
             # threshold filtering pred_boxes
@@ -712,7 +714,7 @@ def main():
             # keep = obb_nms_corners_sizeaware(all_corners, all_scores, all_sizes, iou_thresh=0.1, size_ratio_thresh=1.25)  # keep 是 index 列表
             keep, iou_mat = obb_nms_corners_sizeaware_v2(
                                 pred_box_ue, all_scores, all_sizes,
-                                iou_thresh=0.01, #0.1,
+                                iou_thresh=0.01, #0.01, 0.1
                                 hard_iou_thresh=0.50,
                                 size_ratio_thresh=2.0,#1.5,
                                 return_iou_matrix=True,
@@ -721,7 +723,7 @@ def main():
             pred_box_ue = pred_box_ue[keep]
             
             # print('pred_box_aligned', pred_box_aligned.shape)
-            box_dir = os.path.join(args.pred_root, 'box')
+            box_dir = os.path.join(args.pred_root, 'box'+'_'+str(args.box_threshold*100))
             os.makedirs(box_dir, exist_ok=True)
             boxes3d_to_ply(pred_box_ue, os.path.join(box_dir, seq+"_"+str(i)+'_bboxes_aligned.ply'))
             np.save(os.path.join(os.path.join(box_dir, seq+"_"+str(i)+'_bboxes_aligned.npy')), pred_box_ue)
@@ -744,5 +746,5 @@ if __name__ == "__main__":
 
 
 '''
-CUDA_VISIBLE_DEVICES=3 python pred_alignment_scannetpp.py   --pred_root /data1/lyq/scannetpp_results/  --pred_gt_root /data1/lyq/scannetpp_results/gt_data/ --box_threshold 0.3
+CUDA_VISIBLE_DEVICES=1 python pred_alignment_scannetpp.py   --pred_root /data1/lyq/scannetpp_results_depth/  --pred_gt_root /data1/lyq/scannetpp_results_depth/gt_data/ --box_threshold 0.8
 '''

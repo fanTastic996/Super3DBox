@@ -645,9 +645,6 @@ def main():
     for seq in scenes:
         for i in range(2):
             
-            # if i != 1:
-                # continue
-            
             pred_root = os.path.join(args.pred_root, seq, str(i))
             gt_root = os.path.join(args.pred_gt_root, seq, str(i))
             filterd_pred_ply = os.path.join(args.pred_root,'ply', seq + '_' + str(i) + '_pred.ply')
@@ -686,43 +683,45 @@ def main():
             R = np.asarray(R).reshape(3, 3)
 
             pred_box_ue = c * np.einsum('nkj,ij->nki', pred_box, R) + t   # [N,8,3]
-            
-            import os 
-            pcd = o3d.geometry.PointCloud()
-            pcd.points = o3d.utility.Vector3dVector(pred_pts)
-            
-            pcd_gt = o3d.geometry.PointCloud()
-            pcd_gt.points = o3d.utility.Vector3dVector(gt_pts)
-            
+                        
             # option 2
+            # import os 
+            
+            # pcd = o3d.geometry.PointCloud()
+            # pcd.points = o3d.utility.Vector3dVector(pred_pts)
+            
+            # pcd_gt = o3d.geometry.PointCloud()
+            # pcd_gt.points = o3d.utility.Vector3dVector(gt_pts)
+
             # 估计法向量（半径一般取 2~3 倍 voxel）
-            radius = 0.02 * 3.0
-            pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=radius, max_nn=30))
-            pcd_gt.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=radius, max_nn=30))
+            # radius = 0.02 * 3.0
+            # pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=radius, max_nn=30))
+            # pcd_gt.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=radius, max_nn=30))
 
-            init_T = np.eye(4)
-            max_corr = 0.02 * 3.0
+            # init_T = np.eye(4)
+            # max_corr = 0.02 * 3.0
 
-            reg_p2p = o3d.pipelines.registration.registration_icp(
-                pcd, pcd_gt,
-                max_corr, init_T,
-                o3d.pipelines.registration.TransformationEstimationPointToPlane(),
-                o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=50)
-            )
-            transformation = reg_p2p.transformation
-            pcd = pcd.transform(transformation)
+            # reg_p2p = o3d.pipelines.registration.registration_icp(
+            #     pcd, pcd_gt,
+            #     max_corr, init_T,
+            #     o3d.pipelines.registration.TransformationEstimationPointToPlane(),
+            #     o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=50)
+            # )
+            # transformation = reg_p2p.transformation
+            # pcd = pcd.transform(transformation)
             
             pcd_other = apply_sim3_to_pcd(pcd_other, c, R, t)
             # 检查 ICP transform 的平移距离，如果超过 5m 则不应用
-            translation = transformation[0:3, 3]
-            translation_distance = np.linalg.norm(translation)
-            if translation_distance <= 5.0:
-                pcd_other.transform(transformation)
-                pred_box_ue = apply_se3_to_corners(pred_box_ue, reg_p2p.transformation)
+            # translation = transformation[0:3, 3]
+            # translation_distance = np.linalg.norm(translation)
+            # if translation_distance <= 5.0:
+            #     pcd_other.transform(transformation)
+            #     pred_box_ue = apply_se3_to_corners(pred_box_ue, reg_p2p.transformation)
 
-            save_ply_path = os.path.join(args.pred_root, 'ply', seq + '_' + str(i) + '_ours_scene_aligned.ply')
-            print('save_ply_path', save_ply_path)
-            ok = o3d.io.write_point_cloud(save_ply_path, pcd_other)
+            #TODO:save aligned pcd of pred_pts
+            # save_ply_path = os.path.join(args.pred_root, 'ply', seq + '_' + str(i) + '_ours_scene_aligned.ply')
+            # print('save_ply_path', save_ply_path)
+            # ok = o3d.io.write_point_cloud(save_ply_path, pcd_other)
 
             
             # threshold filtering pred_boxes
@@ -737,7 +736,7 @@ def main():
             # keep = obb_nms_corners_sizeaware(all_corners, all_scores, all_sizes, iou_thresh=0.1, size_ratio_thresh=1.25)  # keep 是 index 列表
             keep, iou_mat = obb_nms_corners_sizeaware_v2(
                                 pred_box_ue, all_scores, all_sizes,
-                                iou_thresh=0.01, #0.1,
+                                iou_thresh=0.1, # 0.01 #0.1,
                                 hard_iou_thresh=0.50,
                                 size_ratio_thresh=2.0,#1.5,
                                 return_iou_matrix=True,
@@ -746,12 +745,22 @@ def main():
             pred_box_ue = pred_box_ue[keep]
             
             # print('pred_box_aligned', pred_box_aligned.shape)
-            box_dir = os.path.join(args.pred_root, 'box')
+            box_dir = os.path.join(args.pred_root, 'box'+'_'+str(args.box_threshold*100))
             os.makedirs(box_dir, exist_ok=True)
             boxes3d_to_ply(pred_box_ue, os.path.join(box_dir, seq+"_"+str(i)+'_bboxes_aligned.ply'))
             np.save(os.path.join(os.path.join(box_dir, seq+"_"+str(i)+'_bboxes_aligned.npy')), pred_box_ue)
     
-
+            #save final pkl
+            final_pkl_path = os.path.join(args.pred_root, 'pkl', seq+"_"+str(i)+'_pred.pkl')
+            with open(final_pkl_path, 'rb') as f:
+                final_pred_data = pickle.load(f)
+            final_box_corners = final_pred_data['corners']
+            final_box_corners = c * np.einsum('nkj,ij->nki', final_box_corners, R) + t
+            final_pred_data['corners'] = final_box_corners
+            final_pkl_path = final_pkl_path.replace('_pred', '_pred_aligned.pkl')
+            with open(final_pkl_path, 'wb') as f:
+                pickle.dump(final_pred_data, f)
+            print(f'saved final pkl to {final_pkl_path}')
 
 
 
@@ -763,4 +772,9 @@ if __name__ == "__main__":
 
 '''
 python pred_alignment_ca1m.py   --pred_root /data1/lyq/CA1M_results_rgb/  --pred_gt_root /data1/lyq/CA1M_results_rgb/gt_data/ --box_threshold 0.8
+
+python pred_alignment_ca1m.py   --pred_root /data1/lyq/CA1M_results_rgb_no2d3dfusion/  --pred_gt_root /data1/lyq/CA1M_results_rgb_no2d3dfusion/gt_data/ --box_threshold 0.8
+
+python pred_alignment_ca1m.py   --pred_root /data1/lyq/CA1M_results_rgb_nomvf_no2d3dfusion/  --pred_gt_root /data1/lyq/CA1M_results_rgb_nomvf_no2d3dfusion/gt_data/ --box_threshold 0.8
+
 '''

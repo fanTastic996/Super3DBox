@@ -11,10 +11,10 @@ import argparse
 import json
 import numpy as np
 parser = argparse.ArgumentParser(description="IGGT Scene Processor")
-parser.add_argument('--model_path', type=str, default="/home/lanyuqing/myproject/code/vggt/training/logs/exp001/ckpts/checkpoint_3k_new_mvf_rgbmode_40epoch_Grefine.pt", help='Path to model checkpoint')
-parser.add_argument('--json_dir', type=str, default="/data1/lyq/scannetpp_json/", help='Input directory path')
-parser.add_argument('--data_root', type=str, default="/data1/lyq/scannetpp", help='Input directory path')
-parser.add_argument('--save_dir', type=str, default="/data1/lyq/scannetpp_results", help='Output directory path')
+parser.add_argument('--model_path', type=str, default="/home/lanyuqing/myproject/code/vggt/training/logs/exp001/ckpts/checkpoint_3k_new_mvf_rgbmode_40epoch.pt", help='Path to model checkpoint')
+parser.add_argument('--json_dir', type=str, default="/data1/lyq/scannetpp-benchmark/", help='Input directory path')
+parser.add_argument('--data_root', type=str, default="/data1/lyq/scannetpp_iphone", help='Input directory path')
+parser.add_argument('--save_dir', type=str, default="/data1/lyq/scannetpp_results_depth", help='Output directory path')
 parser.add_argument('--overwrite', action='store_true', help='Overwrite existing predictions')
 parser.add_argument(
     "--conf_threshold", type=float, default=25.0, help="Initial percentage of low-confidence points to filter out"
@@ -65,16 +65,15 @@ for json_path in json_paths:
         #     count += 1
         #     print(f'{args.save_dir}/{scene_id}_{count}_pred.pkl already exists')
         #     continue
-        if count > 3:
-            continue
+        # if count > 3:
+        #     continue
         # Load and preprocess example images (replace with your own image paths) 
         # Build image list from indices in all_id_lists[idx]
-        image_names = [f"{data_root}/{scene_id}/{count}/{int(i)}.JPG" for i in frame_ids]
+        image_names = [f"{data_root}/{scene_id}/{count}/{int(i)}.jpg" for i in frame_ids]
         depth_path_list = [f"{data_root}/{scene_id}/{count}/{int(i)}.png" for i in frame_ids]
         
         # images = load_and_preprocess_images(image_names).to(device)
         images = load_and_preprocess_images_original(image_names).to(device)
-        print("images", images.shape, torch.max(images), torch.min(images))
 
         # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
         K=np.loadtxt(f"{data_root}/{scene_id}/K.txt").reshape(3,3)
