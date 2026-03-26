@@ -1,6 +1,0 @@
-
-
-
-版本记录：
-v2: avg多视角features，不做scale，改进了scores根据前景类别的softmax数值来判断
-
