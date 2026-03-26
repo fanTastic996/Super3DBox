@@ -4,7 +4,6 @@
   <p align="center">
     <img src="https://img.shields.io/badge/status-work_in_progress-orange?style=for-the-badge" alt="Work in Progress"/>
     <img src="https://img.shields.io/badge/3D%20Vision-Implicit%20Localization-blue?style=for-the-badge" alt="3D Vision"/>
-    <img src="https://img.shields.io/badge/Method-Slot%20Attention-purple?style=for-the-badge" alt="Slot Attention"/>
   </p>
 </p>
 
