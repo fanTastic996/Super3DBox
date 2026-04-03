@@ -825,7 +825,33 @@ class ESAValidationModel(nn.Module):
 # ─────────────────────────────────────────────
 
 class CornersBoxHead(nn.Module):
-    """Per-slot MLP → 8 corner points in normalized coordinates."""
+    """
+    Per-slot MLP → parameterized 3D box → 8 ordered corner points.
+
+    Outputs center(3) + dims(3) + sin/cos(2) = 8 values, then decodes
+    to 8 corners via fixed geometry.  Yaw rotates around Z axis.
+
+    Corner ordering (looking down -Z, X right, Y up):
+        Bottom (z = -dz/2): 0,1,2,3   Top (z = +dz/2): 4,5,6,7
+          4----5        Y
+         /|   /|        |
+        7----6 |        |___X
+        | 0--|-1       /
+        |/   |/       Z
+        3----2
+    """
+
+    # Unit box corners: [8, 3] at half-extents ±0.5
+    _UNIT_CORNERS = torch.tensor([
+        [-0.5, -0.5, -0.5],  # 0: back-left-bottom
+        [ 0.5, -0.5, -0.5],  # 1: back-right-bottom
+        [ 0.5,  0.5, -0.5],  # 2: front-right-bottom
+        [-0.5,  0.5, -0.5],  # 3: front-left-bottom
+        [-0.5, -0.5,  0.5],  # 4: back-left-top
+        [ 0.5, -0.5,  0.5],  # 5: back-right-top
+        [ 0.5,  0.5,  0.5],  # 6: front-right-top
+        [-0.5,  0.5,  0.5],  # 7: front-left-top
+    ], dtype=torch.float32)
 
     def __init__(self, dim=256):
         super().__init__()
@@ -835,12 +861,52 @@ class CornersBoxHead(nn.Module):
             nn.GELU(),
             nn.Linear(dim, dim),
             nn.GELU(),
-            nn.Linear(dim, 24),  # 8 corners × 3 coords
+            nn.Linear(dim, 8),  # center(3) + dims(3) + sin(1) + cos(1)
         )
+
+    def decode_to_corners(self, params):
+        """
+        Convert box parameters to 8 ordered corner coordinates.
+
+        Args:
+            params: [..., 8] — center(3), dims_raw(3), sin_raw(1), cos_raw(1)
+        Returns:
+            corners: [..., 8, 3]
+        """
+        center = params[..., :3]                          # [..., 3]
+        dims = F.softplus(params[..., 3:6]) + 1e-4        # [..., 3] positive
+        sin_raw = params[..., 6:7]                         # [..., 1]
+        cos_raw = params[..., 7:8]                         # [..., 1]
+
+        # Normalize to unit vector
+        norm = torch.sqrt(sin_raw ** 2 + cos_raw ** 2 + 1e-8)
+        sin_yaw = sin_raw / norm                           # [..., 1]
+        cos_yaw = cos_raw / norm                           # [..., 1]
+
+        # Rotation matrix around Z axis: [[cos, -sin, 0], [sin, cos, 0], [0, 0, 1]]
+        zeros = torch.zeros_like(sin_yaw)
+        ones = torch.ones_like(sin_yaw)
+        # Build [..., 3, 3]
+        row0 = torch.cat([cos_yaw, -sin_yaw, zeros], dim=-1)  # [..., 3]
+        row1 = torch.cat([sin_yaw,  cos_yaw, zeros], dim=-1)
+        row2 = torch.cat([zeros,    zeros,   ones],  dim=-1)
+        R = torch.stack([row0, row1, row2], dim=-2)            # [..., 3, 3]
+
+        # Scale unit corners by dims
+        unit = self._UNIT_CORNERS.to(params.device)            # [8, 3]
+        scaled = unit * dims.unsqueeze(-2)                     # [..., 8, 3]
+
+        # Rotate: corners = scaled @ R^T  (R rotates column vectors, so row form uses R^T)
+        rotated = torch.einsum("...pc,...rc->...pr", scaled, R)  # [..., 8, 3]
+
+        # Translate
+        corners = rotated + center.unsqueeze(-2)               # [..., 8, 3]
+        return corners
 
     def forward(self, slots):
         """slots: [B, K, D] → [B, K, 8, 3]"""
-        return self.head(slots).reshape(*slots.shape[:2], 8, 3)
+        params = self.head(slots)          # [B, K, 8]
+        return self.decode_to_corners(params)
 
 
 class SlotClassifier(nn.Module):

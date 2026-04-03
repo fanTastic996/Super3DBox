@@ -43,7 +43,7 @@ IMG_SIZE, PATCH_SIZE = 518, 14
 GRID_H = GRID_W = IMG_SIZE // PATCH_SIZE
 N_PATCHES = GRID_H * GRID_W
 
-NUM_SLOTS = 32
+NUM_SLOTS = 64
 NUM_GLOBAL = 2
 SLOT_DIM = 256
 NUM_ITER = 3
@@ -439,8 +439,22 @@ def main():
     log.info("=" * 50)
 
     # 1. Load specific scene and frames
+    SCENE_ID = "47204573"     
+    FRAME_IDS = [101, 409, 444, 505]
+
+    '''
     SCENE_ID = "42898849"
     FRAME_IDS = [186, 361, 569, 828]
+
+    SCENE_ID = "47115525"      大场景
+    FRAME_IDS = [144, 156, 164, 238]   
+
+    SCENE_ID = "47204573"      小物体
+    FRAME_IDS = [101, 409, 444, 505]
+
+    SCENE_ID = "47333452"      中场景（角落）
+    FRAME_IDS = [70, 137, 167, 214]
+    '''
 
     scene_dir = os.path.join(CA1M_DIR, SCENE_ID)
     sel_indices = FRAME_IDS
