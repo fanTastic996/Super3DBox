@@ -181,16 +181,36 @@ class Aggregator(nn.Module):
             if hasattr(self.patch_embed, "mask_token"):
                 self.patch_embed.mask_token.requires_grad_(False)
 
-    def forward(self, images: torch.Tensor) -> Tuple[List[torch.Tensor], int]:
+    def forward(
+        self,
+        images: torch.Tensor,
+        query_callback=None,
+        initial_queries: Optional[torch.Tensor] = None,
+    ):
         """
         Args:
             images (torch.Tensor): Input images with shape [B, S, 3, H, W], in range [0, 1].
                 B: batch size, S: sequence length, 3: RGB channels, H: height, W: width
+            query_callback (Optional[Callable]): QCOD query evolution hook
+                (see vggt.heads.query_cross_attention.QueryEvolutionModule.get_callback).
+                Signature: callback(queries, tokens_full, patch_start_idx, B, S, P_full,
+                                    layer_idx) → (updated_queries, attn_w_or_None)
+                Called after each global attention block.
+                Owned by VGGT (NOT the Aggregator) so its params are not frozen by
+                the "*aggregator*" freeze pattern. See plan D2.
+            initial_queries (Optional[torch.Tensor]): [B, O, query_dim] starting queries
+                used when query_callback is provided.
 
         Returns:
-            (list[torch.Tensor], int):
-                The list of outputs from the attention blocks,
-                and the patch_start_idx indicating where patch tokens begin.
+            If ``query_callback is None`` (default, backward-compatible):
+                (list[torch.Tensor], int):
+                    The list of outputs from the attention blocks,
+                    and the patch_start_idx indicating where patch tokens begin.
+            Otherwise:
+                (list[torch.Tensor], int, torch.Tensor, list[torch.Tensor]):
+                    (output_list, patch_start_idx, final_queries, attn_weights_list)
+                    where attn_weights_list contains only the layers for which the
+                    callback returned a non-None tensor (may be empty).
         """
         B, S, C_in, H, W = images.shape
 
@@ -234,6 +254,11 @@ class Aggregator(nn.Module):
         global_idx = 0
         output_list = []
 
+        # QCOD query evolution bookkeeping
+        queries = initial_queries  # may be None
+        all_attn_weights: List[torch.Tensor] = []
+        query_layer_idx = 0  # increments once per (frame, global) pair
+
         for _ in range(self.aa_block_num):
             for attn_type in self.aa_order:
                 if attn_type == "frame":
@@ -247,6 +272,19 @@ class Aggregator(nn.Module):
                 else:
                     raise ValueError(f"Unknown attention type: {attn_type}")
 
+            # QCOD callback hook: after one (frame, global) pair finishes.
+            # At this point `tokens` is guaranteed to be shape [B, S*P, C]
+            # (see _process_global_attention return path, plan F2).
+            if query_callback is not None and queries is not None:
+                queries, attn_w = query_callback(
+                    queries, tokens, self.patch_start_idx, B, S, P, query_layer_idx
+                )
+                # Only cache non-None attn_w; otherwise drop to save memory
+                # (plan D4: Stage A expects all_attn_weights stays empty).
+                if attn_w is not None:
+                    all_attn_weights.append(attn_w)
+                query_layer_idx += 1
+
             for i in range(len(frame_intermediates)):
                 # concat frame and global intermediates, [B x S x P x 2C]
                 concat_inter = torch.cat([frame_intermediates[i], global_intermediates[i]], dim=-1)
@@ -255,6 +293,9 @@ class Aggregator(nn.Module):
         del concat_inter
         del frame_intermediates
         del global_intermediates
+
+        if query_callback is not None:
+            return output_list, self.patch_start_idx, queries, all_attn_weights
         return output_list, self.patch_start_idx
 
     def _process_frame_attention(self, tokens, B, S, P, C, frame_idx, pos=None):

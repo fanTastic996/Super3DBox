@@ -32,6 +32,7 @@ class CA1MDataset(BaseDataset):
         min_num_images: int = 50, # 24 序列最小图像数量要求
         len_train: int = 100000, # 训练集长度
         len_test: int = 10000, # 测试集长度
+        qcod_sanity_strict: bool = True,  # Phase 1 C2: default strict fail-fast
     ):
         """
         Initialize the CA1MDataset.
@@ -44,10 +45,21 @@ class CA1MDataset(BaseDataset):
             min_num_images (int): Minimum number of images per sequence.
             len_train (int): Length of the training dataset.
             len_test (int): Length of the test dataset.
+            qcod_sanity_strict (bool): If True (default), coordinate-convention
+                errors in load_scene_gt_in_first_frame raise AssertionError
+                immediately (fail-fast). If False, log the error and fall back
+                to empty QCOD GT (sample loses QCOD supervision silently).
+                A fail-count / threshold alarm fires even when strict=False,
+                see _qcod_check_fail_threshold.
         Raises:
             ValueError: If CA1M_DIR or CA1M_ANNOTATION_DIR is not specified.
         """
         super().__init__(common_conf=common_conf)
+
+        self.qcod_sanity_strict = qcod_sanity_strict
+        self._qcod_sanity_fail_count = 0
+        self._qcod_total_load_count = 0
+        self._qcod_fail_threshold = 0.05  # >5% of samples falling back → hard error
 
         self.debug = common_conf.debug # 调试模式
         self.training = common_conf.training # 训练模式标志
@@ -335,24 +347,103 @@ class CA1MDataset(BaseDataset):
         
         
         corners_cam_list = load_gt_corners_cam_multiframe(json_directory, image_idxs,json_name_fmt="{idx}.json", device="cpu")
-        
-        
+
+
         # 使用空的GT boxes
         # change boxes that are not parallel to Z-AXIS to be parallel
         # filtered_bbox_corners, tilted_mask, tilt_degs = self.upright_boxes(filtered_bbox_corners, tilt_deg_thresh=5.0)
-        
+
         # padding invalid boxes
         for i in range(len(corners_cam_list)):
             if isinstance(corners_cam_list[i], tuple):
                 print(f"No valid GT boxes found for seq {seq_name} with image ids {ids}. using fake GT...")
-                corners_cam_list[i] = np.zeros((1, 8, 3), dtype=np.float32) 
+                corners_cam_list[i] = np.zeros((1, 8, 3), dtype=np.float32)
             corners_cam_list[i] = self.process_bbox_corners(corners_cam_list[i])
         # bbox_corners = self.process_bbox_corners(filtered_bbox_corners)  # 处理边界框角点
         corners_cam_list = np.stack(corners_cam_list, axis=0).reshape(-1, 8, 3)
 
+        # =====================================================================
+        # QCOD scene-level GT: instances.json -> sampled first frame camera sys
+        # =====================================================================
+        # seq_poses is already inverted (see line 225: closed_form_inverse_se3),
+        # so seq_poses[i] is w2c. Use the SAMPLED first frame (image_idxs[0]),
+        # NOT a hardcoded 0, as reference for scene GT.
+        first_frame_idx = int(image_idxs[0])
+        first_frame_w2c = seq_poses[first_frame_idx].astype(np.float32)   # [4, 4]
 
+        # Run sanity check only the first time we load a given scene (cheap amortization).
+        _qcod_seen = getattr(self, "_qcod_sanity_checked_scenes", None)
+        if _qcod_seen is None:
+            _qcod_seen = set()
+            self._qcod_sanity_checked_scenes = _qcod_seen
+        _qcod_do_check = seq_name not in _qcod_seen
 
-        
+        self._qcod_total_load_count += 1
+
+        if self.qcod_sanity_strict:
+            # Strict mode (default): let AssertionError propagate → immediate crash.
+            # This is the correct fail-fast behavior for catching c2w/w2c bugs early.
+            scene_gt = load_scene_gt_in_first_frame(
+                scene_path=osp.join(self.CA1M_DIR, seq_name),
+                first_frame_w2c=first_frame_w2c,
+                first_frame_idx_for_check=first_frame_idx,
+                sanity_check=_qcod_do_check,
+            )
+            if _qcod_do_check:
+                _qcod_seen.add(seq_name)
+        else:
+            # Non-strict mode: catch AssertionError, fall back to empty QCOD GT.
+            # Logs loudly + keeps a fail counter with 5% threshold alarm.
+            try:
+                scene_gt = load_scene_gt_in_first_frame(
+                    scene_path=osp.join(self.CA1M_DIR, seq_name),
+                    first_frame_w2c=first_frame_w2c,
+                    first_frame_idx_for_check=first_frame_idx,
+                    sanity_check=_qcod_do_check,
+                )
+                if _qcod_do_check:
+                    _qcod_seen.add(seq_name)
+            except AssertionError as e:
+                logging.error(f"[QCOD] sanity check failed for {seq_name}: {e}")
+                self._qcod_sanity_fail_count += 1
+                fail_ratio = self._qcod_sanity_fail_count / max(self._qcod_total_load_count, 1)
+                if fail_ratio > self._qcod_fail_threshold:
+                    raise RuntimeError(
+                        f"[QCOD] sanity fail ratio {fail_ratio:.2%} exceeds threshold "
+                        f"{self._qcod_fail_threshold:.0%} ({self._qcod_sanity_fail_count}/"
+                        f"{self._qcod_total_load_count}). This likely indicates a "
+                        f"systematic coordinate-convention bug."
+                    ) from e
+                scene_gt = {
+                    "ids": [],
+                    "corners": np.zeros((0, 8, 3), dtype=np.float32),
+                    "R": np.zeros((0, 3, 3), dtype=np.float32),
+                    "scale": np.zeros((0, 3), dtype=np.float32),
+                    "category": [],
+                }
+
+        # Pad to fixed N_max=500 to keep default_collate happy (same pattern as bbox_corners).
+        qcod_n_max = 500
+        n_real = int(scene_gt["corners"].shape[0])
+        if n_real > qcod_n_max:
+            logging.warning(
+                f"[QCOD] scene {seq_name} has {n_real} instances, truncating to {qcod_n_max}"
+            )
+            n_real = qcod_n_max
+
+        qcod_scene_corners = np.zeros((qcod_n_max, 8, 3), dtype=np.float32)
+        qcod_scene_R = np.broadcast_to(
+            np.eye(3, dtype=np.float32), (qcod_n_max, 3, 3)
+        ).copy()  # identity padding
+        qcod_scene_scale = np.zeros((qcod_n_max, 3), dtype=np.float32)
+        qcod_scene_valid = np.zeros((qcod_n_max,), dtype=bool)
+
+        if n_real > 0:
+            qcod_scene_corners[:n_real] = scene_gt["corners"][:n_real]
+            qcod_scene_R[:n_real]       = scene_gt["R"][:n_real]
+            qcod_scene_scale[:n_real]   = scene_gt["scale"][:n_real]
+            qcod_scene_valid[:n_real]   = True
+
         set_name = "CA1M"
         # 构建并返回批次数据
         batch = {
@@ -368,7 +459,13 @@ class CA1MDataset(BaseDataset):
             "bbox_corners": corners_cam_list, # 边界框角点列表
             "point_masks": point_masks,      # 点掩码列表
             "original_sizes": original_sizes,  # 原始尺寸列表
-            "gravity": all_gravity
+            "gravity": all_gravity,
+            # --- QCOD scene-level GT (sampled first frame camera sys, not normalized) ---
+            # See Plan D3/D5: padded numeric tensors only, no List[str] fields.
+            "qcod_scene_corners": qcod_scene_corners,  # [N_max, 8, 3] float32
+            "qcod_scene_R": qcod_scene_R,              # [N_max, 3, 3] float32
+            "qcod_scene_scale": qcod_scene_scale,      # [N_max, 3] float32 (half-extent)
+            "qcod_scene_valid": qcod_scene_valid,      # [N_max] bool
         }
         return batch
 

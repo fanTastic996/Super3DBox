@@ -1156,8 +1156,92 @@ class PromptDecoder(nn.Module):
         self.predictors = nn.ModuleList([nn.ModuleList([copy.deepcopy(p) for p in predictors]) for _ in range(num_layers)])
         self.norm = norm
 
+    @torch.no_grad() 
+    def attach_depth_to_pred_instances(
+        self,
+        pred_instances: list,
+        depths: torch.Tensor,                  # [B, N_img, H, W, 1]
+        image_sizes,                           # sensor['image'].data.image_sizes, list[(H, W), ...]
+        *,
+        mode: str = "bilinear",                # "bilinear" or "nearest"
+        padding_mode: str = "border",          # "zeros"|"border"|"reflection"
+        align_corners: bool = False,
+        out_shape: str = "Q1",                 # "Q1" -> [Q,1], "Q" -> [Q]
+    ):
+        """
+        给每个 pred_instances[i] 添加 pred_z_scaled（从对应 depth 图采样得到）
+        约定：
+        - pred_instances[i].pred_proj_xy: [Q,2]，像素坐标系 (x,y)
+        - image_sizes[i]: (H_i, W_i)
+        - pred_instances 长度通常应为 B*N_img（与 depths reshape 后一致）
+        """
+        assert depths.ndim == 5 and depths.shape[-1] == 1, f"depths shape should be [B,N,H,W,1], got {tuple(depths.shape)}"
+        B, N_img, H, W, _ = depths.shape
+
+        # [B, N_img, H, W]
+        depths_4d = depths.squeeze(-1)
+
+        # [B*N_img, H, W]
+        depths_flat = depths_4d.reshape(B * N_img, H, W)
+
+        # 处理 image_sizes：可能只给了 N_img（单个 batch），也可能给了 B*N_img
+        image_sizes = list(image_sizes)
+        if len(image_sizes) == N_img and B > 1:
+            image_sizes = image_sizes * B  # 按 batch repeat
+        if len(image_sizes) != B * N_img:
+            raise ValueError(f"image_sizes length must be N_img ({N_img}) or B*N_img ({B*N_img}), got {len(image_sizes)}")
+
+        if len(pred_instances) != B * N_img:
+            raise ValueError(f"pred_instances length should be B*N_img ({B*N_img}), got {len(pred_instances)}")
+
+        for i, inst in enumerate(pred_instances):
+            xy = inst.pred_proj_xy  # [Q,2]
+            if not torch.is_tensor(xy):
+                raise TypeError(f"pred_instances[{i}].pred_proj_xy must be a torch.Tensor")
+
+            device = xy.device
+            dtype = xy.dtype
+
+            h_i, w_i = image_sizes[i]  # (H, W)
+            # 取对应 depth 图：[H,W] -> [1,1,H,W]
+            depth_img = depths_flat[i].to(device=device, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+
+            # xy: pixel coords (x,y)
+            x = xy[:, 0].to(torch.float32)
+            y = xy[:, 1].to(torch.float32)
+
+            # 转成 grid_sample 需要的 [-1, 1] 坐标
+            if align_corners:
+                # 像素 0..W-1 映射到 -1..1
+                xg = (x / max(w_i - 1, 1)) * 2 - 1
+                yg = (y / max(h_i - 1, 1)) * 2 - 1
+            else:
+                # 像素中心对齐： (x+0.5)/W
+                xg = ((x + 0.5) / w_i) * 2 - 1
+                yg = ((y + 0.5) / h_i) * 2 - 1
+
+            grid = torch.stack([xg, yg], dim=-1).view(1, -1, 1, 2)  # [1, Q, 1, 2]
+
+            # [1,1,H,W] + [1,Q,1,2] -> [1,1,Q,1]
+            sampled = F.grid_sample(
+                depth_img,
+                grid,
+                mode=mode,
+                padding_mode=padding_mode,
+                align_corners=align_corners,
+            )
+
+            z = sampled.view(-1)  # [Q]
+            if out_shape == "Q1":
+                z = z.view(-1, 1)  # [Q,1]
+
+            # 写回实例（保持你要求的字段名）
+            inst.pred_z_scaled = z.to(device=device, dtype=dtype)
+
+        return pred_instances
+    
     def forward(
-        self, vggt_features, src, src_pos_embed, src_padding_mask, src_spatial_shapes, level_start_index, valid_ratios,
+        self, vggt_features, depths, src, src_pos_embed, src_padding_mask, src_spatial_shapes, level_start_index, valid_ratios,
         prompts, sensor, batch, img_num, vHW_patch):
         # Not the best assumption for now, but assume we can treat the "prompt" in a uniform manner as "reference.
         # Interleave so we have List[List[Instances]] of size # of instances x # of prompts
@@ -1224,9 +1308,23 @@ class PromptDecoder(nn.Module):
                 pred_instances_.object_desc = output_
 
             intermediate.append(output_after_norm)
+            
+
+            # if lid == len(self.layers) - 1:
+            #     pred_instances = self.attach_depth_to_pred_instances(
+            #     pred_instances,
+            #     depths,
+            #     sensor["image"].data.image_sizes,
+            #     mode="bilinear",
+            #     align_corners=False,
+            #     out_shape="Q1",
+            # )
+            
             intermediate_preds.append(pred_instances)
             reference = pred_instances
-
+            
+            
+            
         # Always return the full sequence of intermediates.
         return torch.stack(intermediate), intermediate_preds
 

@@ -21,14 +21,15 @@ from torch.nn.functional import l1_loss
 class MultitaskLoss(torch.nn.Module):
     """
     Multi-task loss module that combines different loss types for VGGT.
-    
+
     Supports:
     - Camera loss
-    - Depth loss 
+    - Depth loss
     - Point loss
     - Tracking loss (not cleaned yet, dirty code is at the bottom of this file)
+    - QCOD loss (query-coevolution 3D object detection, see qcod_loss.py)
     """
-    def __init__(self, camera=None, depth=None, point=None, track=None, box=None, **kwargs):
+    def __init__(self, camera=None, depth=None, point=None, track=None, box=None, qcod=None, **kwargs):
         super().__init__()
         # Loss configuration dictionaries for each task
         self.camera = camera
@@ -36,6 +37,27 @@ class MultitaskLoss(torch.nn.Module):
         self.point = point
         self.track = track
         self.box = box
+        # QCOD config: expected dict or OmegaConf with keys
+        #   weight (float, overall QCOD loss weight, default 1.0)
+        #   loss_weights (dict → QCODLossConfig fields)
+        #   fada_layers (str, for runtime assertion; see plan Step 3.8)
+        self.qcod = qcod
+
+        # Consistency check: fada > 0 requires fada_layers != "none"
+        if qcod is not None:
+            try:
+                lw = qcod.get("loss_weights", {}) if hasattr(qcod, "get") else (qcod.loss_weights if hasattr(qcod, "loss_weights") else {})
+                fada_w = float(lw.get("fada", 0.0) if hasattr(lw, "get") else getattr(lw, "fada", 0.0))
+                fada_layers = qcod.get("fada_layers", "none") if hasattr(qcod, "get") else getattr(qcod, "fada_layers", "none")
+                if fada_w > 0 and fada_layers == "none":
+                    raise AssertionError(
+                        "QCOD config: loss_weights.fada > 0 but fada_layers == 'none'. "
+                        "Set fada_layers to 'last' or 'all' so QueryEvolutionModule "
+                        "keeps cross-attn weights, or set fada=0."
+                    )
+            except (AttributeError, TypeError):
+                # qcod may be a plain dict without .get — fallback no-op
+                pass
 
     def forward(self, predictions, batch) -> torch.Tensor:
         """
@@ -91,7 +113,57 @@ class MultitaskLoss(torch.nn.Module):
         # Tracking loss - not cleaned yet, dirty code is at the bottom of this file
         if "track" in predictions:
             raise NotImplementedError("Track loss is not cleaned up yet")
-        
+
+        # ── QCOD loss (Query-coevolution 3D object detection) ──
+        # Lazy-import to break the potential loss.py ↔ qcod_loss.py circular
+        # dependency (plan Phase 2 bugfix #1).
+        if self.qcod is not None and "qcod_corners" in predictions:
+            from qcod_loss import compute_qcod_loss, QCODLossConfig
+
+            # Unpack config.
+            lw = self.qcod.get("loss_weights", {}) if hasattr(self.qcod, "get") else getattr(self.qcod, "loss_weights", {})
+
+            def _get(key, default):
+                if hasattr(lw, "get"):
+                    return lw.get(key, default)
+                return getattr(lw, key, default)
+
+            cfg = QCODLossConfig(
+                chamfer=float(_get("chamfer", 1.0)),
+                center_l1=float(_get("center_l1", 3.0)),
+                cls=float(_get("cls", 1.0)),
+                rotation=float(_get("rotation", 1.0)),
+                size=float(_get("size", 0.3)),
+                activation=float(_get("activation", 0.0)),
+                fada=float(_get("fada", 0.0)),
+            )
+
+            # Rename qcod_* -> bare keys for compute_qcod_loss's expected layout.
+            qcod_preds = {
+                "qcod_corners": predictions["qcod_corners"],
+                "qcod_center": predictions["qcod_center"],
+                "qcod_size": predictions["qcod_size"],
+                "qcod_logits": predictions["qcod_logits"],
+                "qcod_R": predictions["qcod_R"],
+            }
+            if "qcod_activation_logits" in predictions:
+                qcod_preds["qcod_activation_logits"] = predictions["qcod_activation_logits"]
+            if "qcod_cross_attn_weights" in predictions:
+                qcod_preds["qcod_cross_attn_weights"] = predictions["qcod_cross_attn_weights"]
+
+            qcod_losses = compute_qcod_loss(qcod_preds, batch, cfg)
+
+            qcod_weight = float(self.qcod.get("weight", 1.0)) if hasattr(self.qcod, "get") else float(getattr(self.qcod, "weight", 1.0))
+            qcod_total = qcod_losses["total"] * qcod_weight
+            total_loss = total_loss + qcod_total
+
+            # Namespace each sub-loss under loss_qcod_* for logging.
+            for k, v in qcod_losses.items():
+                if k == "num_matched":
+                    loss_dict[f"qcod_num_matched"] = v
+                else:
+                    loss_dict[f"loss_qcod_{k}"] = v
+
         loss_dict["objective"] = total_loss
 
         return loss_dict

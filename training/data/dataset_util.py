@@ -972,6 +972,226 @@ def load_gt_corners_cam_multiframe(
 
     return corners_cam_list
 
+
+# =====================================================================
+# QCOD (Query-Coevolved Object Detection) GT loaders
+# =====================================================================
+
+@torch.no_grad()
+def _qcod_sanity_check_via_per_frame(
+    scene_path: str,
+    scene_ids: List[str],
+    scene_corners_cam1: np.ndarray,
+    first_frame_idx: int,
+    tol: float = 1.0,
+) -> None:
+    """
+    Closed-loop verification that scene GT was correctly transformed into the
+    sampled first frame's camera coordinate system.
+
+    For each instance present in both scene instances.json and the per-frame
+    instances/{first_frame_idx}.json, compare the transformed scene corners
+    (scene_corners_cam1) against the per-frame JSON corners (which are natively
+    in that frame's camera coords). If the average discrepancy exceeds tol,
+    this almost certainly indicates a c2w/w2c convention mix-up upstream.
+
+    Args:
+        scene_path: directory containing instances/ subfolder
+        scene_ids: List[str] UUIDs aligned with scene_corners_cam1 rows
+        scene_corners_cam1: [N, 8, 3] scene GT after the world -> cam1 transform
+        first_frame_idx: int, the SAMPLED first frame index (image_idxs[0])
+                         NOT a hardcoded 0. CA1M sampling picks a random start.
+        tol: meters. The residual between scene OBB (global fit) and per-frame
+             OBB is typically 0.2-0.5m; anything > 1.0m means transform is wrong.
+    """
+    pf_path = os.path.join(scene_path, "instances", f"{first_frame_idx}.json")
+    if not os.path.exists(pf_path):
+        return
+
+    try:
+        with open(pf_path, "r") as f:
+            pf_data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return
+
+    pf_by_id: Dict[str, np.ndarray] = {}
+    for inst in pf_data:
+        try:
+            pf_by_id[inst["id"]] = np.asarray(
+                inst["corners"], dtype=np.float32
+            ).reshape(8, 3)
+        except (KeyError, ValueError):
+            continue
+
+    errors: List[float] = []
+    for i, iid in enumerate(scene_ids):
+        if iid not in pf_by_id:
+            continue
+        pred = scene_corners_cam1[i].astype(np.float64)  # [8, 3]
+        gt = pf_by_id[iid].astype(np.float64)            # [8, 3]
+        # Chamfer-ish: average nearest-neighbor distance in both directions
+        diff = pred[:, None, :] - gt[None, :, :]         # [8, 8, 3]
+        dist = np.linalg.norm(diff, axis=-1)             # [8, 8]
+        err = 0.5 * (dist.min(axis=1).mean() + dist.min(axis=0).mean())
+        errors.append(float(err))
+
+    if not errors:
+        return
+
+    mean_err = float(np.mean(errors))
+    if mean_err >= tol:
+        raise AssertionError(
+            f"[QCOD sanity] Scene GT coord transform failed! "
+            f"scene={scene_path}, first_frame_idx={first_frame_idx}, "
+            f"mean_err={mean_err:.3f}m (tol={tol}m). "
+            f"Likely c2w/w2c convention mismatch — check first_frame_w2c."
+        )
+
+
+@torch.no_grad()
+def load_scene_gt_in_first_frame(
+    scene_path: str,
+    first_frame_w2c: np.ndarray,
+    first_frame_idx_for_check: int = None,
+    sanity_check: bool = True,
+    ignored_categories: Tuple[str, ...] = ("wall", "floor", "ceiling"),
+) -> Dict[str, Any]:
+    """
+    Load scene-level GT from ``{scene_path}/instances.json`` and transform it
+    from the raw world coordinate system into the SAMPLED first frame's
+    camera coordinate system.
+
+    IMPORTANT CONVENTIONS (do not guess, verified via closed-loop test):
+      * ``instances.json`` ``corners`` / ``R`` / ``position`` are in the raw
+        dataset **world** coordinate system (NOT already in any camera frame).
+      * ``scale`` is the **full** box extent along each local axis — the
+        caller will see ``scale / 2`` (half-extent) in the returned dict.
+      * ``first_frame_w2c`` must be **w2c** (world-to-camera). In CA1M the
+        raw ``all_poses.npy`` stores c2w, so the caller must pass either
+        ``closed_form_inverse_se3(all_poses[idx])`` or the already-inverted
+        ``seq_poses[idx]`` from ``ca1m.py`` (see line 225).
+      * ``first_frame_idx_for_check`` must be the **sampled** frame index
+        ``image_idxs[0]``, not a hardcoded 0.
+
+    Args:
+        scene_path: scene directory (contains ``instances.json`` and
+            ``instances/{idx}.json`` files).
+        first_frame_w2c: [4, 4] world-to-camera matrix for the sampled first
+            frame (OpenCV convention).
+        first_frame_idx_for_check: int, the sampled first frame index. Only
+            used by the optional sanity check; can be None to disable.
+        sanity_check: if True and first_frame_idx_for_check is not None,
+            run the closed-loop check after transforming.
+        ignored_categories: categories filtered out (walls/floors/ceilings
+            are not meaningful as target instances).
+
+    Returns:
+        Dict with:
+            ids:      List[str], length N (instance UUIDs)
+            corners:  np.ndarray [N, 8, 3] float32 — sampled first frame camera
+                      system (NOT yet normalized by avg_scale)
+            R:        np.ndarray [N, 3, 3] float32 — rotation in cam1 frame
+            scale:    np.ndarray [N, 3]    float32 — HALF extents (scale / 2)
+            category: List[str], length N
+    """
+    instances_path = os.path.join(scene_path, "instances.json")
+    if not os.path.exists(instances_path):
+        return {
+            "ids": [],
+            "corners": np.zeros((0, 8, 3), dtype=np.float32),
+            "R": np.zeros((0, 3, 3), dtype=np.float32),
+            "scale": np.zeros((0, 3), dtype=np.float32),
+            "category": [],
+        }
+
+    with open(instances_path, "r") as f:
+        scene_data = json.load(f)
+
+    ids: List[str] = []
+    corners_list: List[np.ndarray] = []
+    R_list: List[np.ndarray] = []
+    scale_list: List[np.ndarray] = []
+    cat_list: List[str] = []
+
+    for inst in scene_data:
+        cat = inst.get("category", "")
+        if cat in ignored_categories:
+            continue
+        if "id" not in inst or "corners" not in inst:
+            continue
+        try:
+            c = np.asarray(inst["corners"], dtype=np.float32).reshape(8, 3)
+        except (ValueError, TypeError):
+            continue
+        # R and scale are not strictly required for the pipeline (derived
+        # supervision only uses corners), but the QCOD loss needs them for
+        # rotation regression and optional size loss. Default to identity/zeros
+        # if missing to keep the loader robust.
+        try:
+            R = np.asarray(
+                inst.get("R", np.eye(3, dtype=np.float32)), dtype=np.float32
+            ).reshape(3, 3)
+        except (ValueError, TypeError):
+            R = np.eye(3, dtype=np.float32)
+        try:
+            s = np.asarray(
+                inst.get("scale", np.zeros(3, dtype=np.float32)),
+                dtype=np.float32,
+            ).reshape(3)
+        except (ValueError, TypeError):
+            s = np.zeros(3, dtype=np.float32)
+
+        ids.append(inst["id"])
+        corners_list.append(c)
+        R_list.append(R)
+        scale_list.append(s)
+        cat_list.append(cat)
+
+    if len(corners_list) == 0:
+        return {
+            "ids": [],
+            "corners": np.zeros((0, 8, 3), dtype=np.float32),
+            "R": np.zeros((0, 3, 3), dtype=np.float32),
+            "scale": np.zeros((0, 3), dtype=np.float32),
+            "category": [],
+        }
+
+    corners_world = np.stack(corners_list, axis=0)  # [N, 8, 3]
+    R_world = np.stack(R_list, axis=0)              # [N, 3, 3]
+    scale_full = np.stack(scale_list, axis=0)       # [N, 3] (full extent)
+
+    # --- world -> sampled first frame camera ---
+    # X_cam1 = R_w2c @ X_world + t_w2c
+    w2c = np.asarray(first_frame_w2c, dtype=np.float32)
+    R_w2c = w2c[:3, :3]                             # [3, 3]
+    t_w2c = w2c[:3, 3]                              # [3]
+    corners_cam1 = corners_world @ R_w2c.T + t_w2c[None, None, :]  # [N, 8, 3]
+    R_cam1 = R_w2c[None] @ R_world                                 # [N, 3, 3]
+
+    # JSON scale is FULL extent; downstream pipeline uses HALF extent.
+    # This matches Direct3DBoxHead.size = exp(log_size) (half-extent) convention.
+    half_extent = scale_full * 0.5                                 # [N, 3]
+
+    result = {
+        "ids": ids,
+        "corners": corners_cam1.astype(np.float32),
+        "R": R_cam1.astype(np.float32),
+        "scale": half_extent.astype(np.float32),
+        "category": cat_list,
+    }
+
+    if sanity_check and first_frame_idx_for_check is not None:
+        _qcod_sanity_check_via_per_frame(
+            scene_path=scene_path,
+            scene_ids=ids,
+            scene_corners_cam1=result["corners"],
+            first_frame_idx=int(first_frame_idx_for_check),
+            tol=1.0,
+        )
+
+    return result
+
+
 # -----------------------------
 # main function
 # -----------------------------

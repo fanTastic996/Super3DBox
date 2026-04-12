@@ -413,10 +413,24 @@ def normalize_camera_extrinsics_and_points_boxes_batch(
     scale_by_points: bool = True,
     point_masks: Optional[torch.Tensor] = None,
     bbox_corners: Optional[torch.Tensor] = None,
-) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
+    qcod_scene_corners: Optional[torch.Tensor] = None,
+    qcod_scene_scale: Optional[torch.Tensor] = None,
+    qcod_scene_valid: Optional[torch.Tensor] = None,
+) -> Tuple[torch.Tensor, ...]:
     """
     Normalize camera extrinsics and corresponding 3D points.
-    
+
+    Optionally also normalizes QCOD scene-level GT (see Plan D3 Step D):
+      * qcod_scene_corners: [B, N_max, 8, 3]  — scene GT already in sampled first
+        frame camera system (from load_scene_gt_in_first_frame). Will be
+        divided by the SAME ``avg_scale`` derived from valid world points.
+      * qcod_scene_scale:   [B, N_max, 3]     — half-extent, also scaled by avg_scale.
+      * qcod_scene_valid:   [B, N_max] bool   — padding mask, NOT normalized.
+
+    Returning them inside this function (rather than exposing avg_scale to
+    callers) keeps a single source of truth for scale handling and prevents
+    callers from forgetting to apply it — same guard as the existing
+    bbox_corners path. See plan D3 Step D for rationale.
     This function transforms the coordinate system to be centered at the first camera
     and optionally scales the scene to have unit average distance.
     
@@ -517,11 +531,11 @@ def normalize_camera_extrinsics_and_points_boxes_batch(
         new_world_points = new_world_points / avg_scale.view(-1, 1, 1, 1, 1)
         # 用平均距离缩放世界bbox角点
         new_bbox_corners = new_bbox_corners / avg_scale.view(-1, 1, 1, 1)
-        
+
         #mask those batches that are bad
         new_bbox_corners = new_bbox_corners.masked_fill(bad_batch.view(-1, 1, 1, 1), 0.0)
         point_masks = point_masks.masked_fill(bad_batch.view(-1, 1, 1, 1), False)
-        
+
         # 缩放相机外参的平移分量
         new_extrinsics[:, :, :3, 3] = new_extrinsics[:, :, :3, 3] / avg_scale.view(-1, 1, 1)
         # 缩放深度图和相机坐标点（如果存在）
@@ -529,13 +543,45 @@ def normalize_camera_extrinsics_and_points_boxes_batch(
             new_depths = new_depths / avg_scale.view(-1, 1, 1, 1)
         if cam_points is not None:
             new_cam_points = new_cam_points / avg_scale.view(-1, 1, 1, 1, 1)
+
+        # --- QCOD scene-level GT normalization (shares avg_scale) ---
+        # qcod_scene_corners is already in sampled first frame camera system
+        # (see load_scene_gt_in_first_frame), so we only need to divide by
+        # avg_scale — no coordinate transform here.
+        if qcod_scene_corners is not None:
+            new_qcod_scene_corners = qcod_scene_corners / avg_scale.view(-1, 1, 1, 1)
+            # Zero out instances in bad batches so the loss can safely skip them.
+            new_qcod_scene_corners = new_qcod_scene_corners.masked_fill(
+                bad_batch.view(-1, 1, 1, 1), 0.0
+            )
+        else:
+            new_qcod_scene_corners = None
+
+        if qcod_scene_scale is not None:
+            new_qcod_scene_scale = qcod_scene_scale / avg_scale.view(-1, 1, 1)
+            new_qcod_scene_scale = new_qcod_scene_scale.masked_fill(
+                bad_batch.view(-1, 1, 1), 0.0
+            )
+        else:
+            new_qcod_scene_scale = None
+
+        if qcod_scene_valid is not None:
+            # Valid mask is NOT scaled, but bad batches should also zero it out
+            # so downstream Hungarian matching sees zero positives.
+            new_qcod_scene_valid = qcod_scene_valid & (~bad_batch.view(-1, 1))
+        else:
+            new_qcod_scene_valid = None
+    else:
+        new_qcod_scene_corners = qcod_scene_corners
+        new_qcod_scene_scale = qcod_scene_scale
+        new_qcod_scene_valid = qcod_scene_valid
     # else:
     #     # 不缩放时直接返回原尺寸数据（3x4外参格式）
     #     return new_extrinsics[:, :, :3], cam_points, new_world_points, depths, new_bbox_corners
     
     #mask those boxes that are padding due to batch stack
     new_bbox_corners[padding_bbox_mask] = 0.0
-    
+
     # 将4x4外参矩阵截断回3x4格式
     new_extrinsics = new_extrinsics[:, :, :3] # 4x4 -> 3x4
     # 检查并修复输出张量的异常值（NaN/Inf）
@@ -544,9 +590,23 @@ def normalize_camera_extrinsics_and_points_boxes_batch(
     new_world_points = check_and_fix_inf_nan(new_world_points, "new_world_points", hard_max=None)
     new_depths = check_and_fix_inf_nan(new_depths, "new_depths", hard_max=None)
     new_bbox_corners = check_and_fix_inf_nan(new_bbox_corners, "new_bbox_corners", hard_max=None)
-    
-    
-    
+    if new_qcod_scene_corners is not None:
+        new_qcod_scene_corners = check_and_fix_inf_nan(
+            new_qcod_scene_corners, "new_qcod_scene_corners", hard_max=None
+        )
+    if new_qcod_scene_scale is not None:
+        new_qcod_scene_scale = check_and_fix_inf_nan(
+            new_qcod_scene_scale, "new_qcod_scene_scale", hard_max=None
+        )
 
-    # 返回归一化后的四元组结果
-    return new_extrinsics, new_cam_points, new_world_points, new_depths, new_bbox_corners
+    # 返回归一化后的结果 (含新增的 qcod 字段)
+    return (
+        new_extrinsics,
+        new_cam_points,
+        new_world_points,
+        new_depths,
+        new_bbox_corners,
+        new_qcod_scene_corners,
+        new_qcod_scene_scale,
+        new_qcod_scene_valid,
+    )

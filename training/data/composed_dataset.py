@@ -122,6 +122,18 @@ class ComposedDataset(Dataset, ABC):
         # Box GT processing
         if 'bbox_corners' in batch.keys():
             bbox_corners = torch.from_numpy(np.stack(batch["bbox_corners"]).astype(np.float32))
+        # --- QCOD scene-level GT (padded numeric tensors, no List[str]) ---
+        # All four fields are produced by ca1m.py as fixed-size numpy arrays,
+        # so default_collate can stack them across the batch without a custom collate_fn.
+        qcod_scene_corners = None
+        qcod_scene_R = None
+        qcod_scene_scale = None
+        qcod_scene_valid = None
+        if 'qcod_scene_corners' in batch.keys():
+            qcod_scene_corners = torch.from_numpy(batch["qcod_scene_corners"].astype(np.float32))
+            qcod_scene_R       = torch.from_numpy(batch["qcod_scene_R"].astype(np.float32))
+            qcod_scene_scale   = torch.from_numpy(batch["qcod_scene_scale"].astype(np.float32))
+            qcod_scene_valid   = torch.from_numpy(np.asarray(batch["qcod_scene_valid"], dtype=bool))
         if 'gravity' in batch.keys():
             gravity = torch.from_numpy(np.stack(batch["gravity"]).astype(np.float32))
             gravity = mat_to_quat(gravity) #[N_img,3,3]
@@ -158,6 +170,15 @@ class ComposedDataset(Dataset, ABC):
             "point_masks": point_masks,
             "gravity": gravity if 'gravity' in batch.keys() else None,
         }
+
+        # QCOD scene-level GT (only included when upstream dataset provides it).
+        # Keeping these as top-level keys rather than a nested dict so that
+        # default_collate / trainer._process_batch can treat them uniformly.
+        if qcod_scene_corners is not None:
+            sample["qcod_scene_corners"] = qcod_scene_corners
+            sample["qcod_scene_R"]       = qcod_scene_R
+            sample["qcod_scene_scale"]   = qcod_scene_scale
+            sample["qcod_scene_valid"]   = qcod_scene_valid
 
 
         # --- Track Processing (if enabled) ---

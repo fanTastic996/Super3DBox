@@ -709,7 +709,7 @@ class CubifyHead(nn.Module):
         lvl_pos_embed = lvl_pos_embed.repeat(1, N_img, 1)
         
         _, intermediate_preds = self.decoder(
-            vggt_features,
+            vggt_features, depths,
             fused_features, lvl_pos_embed, mask_flatten, spatial_shapes, 
             level_start_index, valid_ratios, prompts, sensor, N_batch, N_img, HW_patch
         )

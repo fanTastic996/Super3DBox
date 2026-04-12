@@ -14,12 +14,16 @@ from vggt.heads.dpt_head import DPTHead
 from vggt.heads.track_head import TrackHead
 from vggt.heads.cubify_head import CubifyHead
 from vggt.heads.vggt_cubify_model import *
+from vggt.heads.query_cross_attention import QueryEvolutionModule
+from vggt.heads.qcod_head import QCODHead
 # from vggt.heads.cubify_head import *
 from vggt.utils.pose_enc import extri_intri_to_pose_encoding, pose_encoding_to_extri_intri, gravity_encoding_to_extri_intri
 
 class VGGT(nn.Module, PyTorchModelHubMixin):
     def __init__(self, img_size=518, patch_size=14, embed_dim=1024,
-                 enable_camera=True, enable_gravity=True, enable_point=True, enable_depth=True, enable_track=True, enable_cubify=True, enable_depth_modality=True):
+                 enable_camera=True, enable_gravity=True, enable_point=True, enable_depth=True, enable_track=True, enable_cubify=True, enable_depth_modality=True,
+                 enable_qcod=False, num_object_queries=64, qcod_query_dim=512,
+                 qcod_fada_layers="none"):
         super().__init__()
         self.patch_size = patch_size
         self.aggregator = Aggregator(img_size=img_size, patch_size=patch_size, embed_dim=embed_dim)
@@ -155,6 +159,31 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
             topk_per_image=200,
             depth_model=depth_model) if enable_cubify else None
             #TODO: change 100->50
+
+        # ── QCOD: Query-coevolution 3D object detection (plan D0/D2) ──
+        # NOTE: query_evolution lives at the VGGT level (NOT inside Aggregator)
+        # so the "*aggregator*" freeze pattern does not freeze it.
+        if enable_qcod:
+            self.query_evolution = QueryEvolutionModule(
+                num_layers=24,                   # must match Aggregator.depth
+                query_dim=qcod_query_dim,        # D0: 512
+                token_dim=embed_dim,             # D0: 1024 (backbone global attn output)
+                num_heads=8,                     # D0: 512 / 8 = 64 head_dim
+                num_queries=num_object_queries,
+                fada_layers=qcod_fada_layers,    # "none" default (Stage A)
+            )
+            self.qcod_head = QCODHead(
+                query_dim=qcod_query_dim,        # from QueryEvolution (D0: 512)
+                token_dim=2 * embed_dim,         # D0: 2048 (VGGT concat)
+                proj_dim=256,                    # D0: fixed
+                gather_dim=256,                  # D0: fixed (= box_in_dim)
+                top_k=128,
+                num_classes=2,
+                num_queries=num_object_queries,   # for per-query spatial anchor
+            )
+        else:
+            self.query_evolution = None
+            self.qcod_head = None
             
     def forward(self, images: torch.Tensor, intrinsics: torch.Tensor= None, extrinsics: torch.Tensor= None, query_points: torch.Tensor = None, inference_tag=False):
         """
@@ -188,7 +217,32 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
         H_patch, W_patch = H_img // self.patch_size, W_img // self.patch_size
         if query_points is not None and len(query_points.shape) == 2:
             query_points = query_points.unsqueeze(0)
-        aggregated_tokens_list, patch_start_idx = self.aggregator(images)
+
+        # ── Aggregator forward (with optional QCOD query evolution hook) ──
+        # plan D2: QueryEvolutionModule lives at VGGT level; aggregator only
+        # calls its callback between frame/global attention pairs. When QCOD is
+        # disabled we use the backward-compatible 2-tuple return path.
+        qcod_final_queries = None
+        qcod_attn_weights = None
+        if self.qcod_head is not None and self.query_evolution is not None:
+            B = images.shape[0]
+            initial_queries = self.query_evolution.initial_queries(
+                batch_size=B, device=images.device
+            )
+            callback = self.query_evolution.get_callback()
+            (
+                aggregated_tokens_list,
+                patch_start_idx,
+                qcod_final_queries,
+                qcod_attn_weights,
+            ) = self.aggregator(
+                images,
+                query_callback=callback,
+                initial_queries=initial_queries,
+            )
+        else:
+            aggregated_tokens_list, patch_start_idx = self.aggregator(images)
+
         # print("aggregated_tokens_list",len(aggregated_tokens_list),aggregated_tokens_list[0].shape)
         # aggregated_tokens_list 24 torch.Size([4, 3, 1263, 2048])
         predictions = {}
@@ -313,8 +367,26 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                 
                 predictions["extrinsics"] = extrinsic
                 predictions["intrinsics"] = intrinsic
-                
-                
+
+
+            # ── QCOD head (Query-coevolution 3D detection) ──
+            # Operates on the LAST layer of aggregated_tokens_list only (plan D2).
+            # QueryEvolutionModule has already processed all 24 layers via the
+            # callback, so final_queries carries all multi-layer information.
+            if self.qcod_head is not None and qcod_final_queries is not None:
+                final_tokens = aggregated_tokens_list[-1]  # [B, S, P_full, 2048]
+                qcod_preds = self.qcod_head(
+                    final_tokens=final_tokens,
+                    patch_start_idx=patch_start_idx,
+                    final_queries=qcod_final_queries,
+                    cross_attn_weights=qcod_attn_weights,  # [] if fada_layers="none"
+                )
+                # Namespace all QCOD predictions with "qcod_" prefix so the loss
+                # function can find them without colliding with CubifyHead keys.
+                for k, v in qcod_preds.items():
+                    predictions[f"qcod_{k}"] = v
+
+
         if self.track_head is not None and query_points is not None:
             track_list, vis, conf = self.track_head(
                 aggregated_tokens_list, images=images, patch_start_idx=patch_start_idx, query_points=query_points

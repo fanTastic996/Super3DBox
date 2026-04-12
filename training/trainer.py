@@ -157,19 +157,29 @@ class Trainer:
         if self.mode != "val":
             self.optims = construct_optimizers(self.model, self.optim_conf)
 
-        # Load checkpoint if available or specified directly load all weights
+        # Load checkpoint if available or specified directly load all weights.
+        #
+        # Three mutually-exclusive entry points with distinct semantics
+        # (see plan C1 for rationale):
+        #   1. checkpoint_conf.resume_checkpoint_path  → legacy "mine" path,
+        #      loads model state + cubify_checkpoint_path via _load_resuming_checkpoint_mine
+        #   2. checkpoint_conf.pretrained_path         → explicit fine-tune start,
+        #      loads model weights only (NO optimizer / epoch / steps / scaler)
+        #   3. get_resume_checkpoint(save_dir)         → auto-resume from latest ckpt,
+        #      full restore: optimizer + epoch + steps + AMP scaler
         if self.checkpoint_conf.resume_checkpoint_path is not None:
-            self._load_resuming_checkpoint_mine(self.checkpoint_conf.resume_checkpoint_path, self.checkpoint_conf.cubify_checkpoint_path)
-        
-        else:   
-            if self.checkpoint_conf.pretrained_path is not None:
-                ckpt_path = self.checkpoint_conf.pretrained_path
-            else:
-                ckpt_path = get_resume_checkpoint(self.checkpoint_conf.save_dir)
+            self._load_resuming_checkpoint_mine(
+                self.checkpoint_conf.resume_checkpoint_path,
+                self.checkpoint_conf.cubify_checkpoint_path,
+            )
+        elif self.checkpoint_conf.pretrained_path is not None:
+            # Explicit fine-tune from a pretrained snapshot: weights-only.
+            self._load_pretrained_weights(self.checkpoint_conf.pretrained_path)
+        else:
+            # Auto-resume from the most recent ckpt in save_dir: FULL resume.
+            ckpt_path = get_resume_checkpoint(self.checkpoint_conf.save_dir)
             if ckpt_path is not None:
                 self._load_resuming_checkpoint(ckpt_path)
-                # self._load_resuming_checkpoint_restart(ckpt_path)
-                # self._load_resuming_checkpoint_temp(ckpt_path)
 
         # Wrap the model with DDP
         self._setup_ddp_distributed_training(distributed, device)
@@ -205,38 +215,35 @@ class Trainer:
         )
         self.rank = dist.get_rank()
 
-    def _load_resuming_checkpoint_restart(self, ckpt_path: str):
-        """Loads a checkpoint from the given path to resume training."""
-        logging.info(f"Resuming training from {ckpt_path} (rank {self.rank})")
+    def _load_pretrained_weights(self, ckpt_path: str):
+        """Load ONLY the model state_dict from a pretrained snapshot.
+
+        ⚠ This is for explicit fine-tune starts (e.g., from a public VGGT checkpoint).
+        It does NOT restore:
+          - optimizer state (momentum / Adam second moment / etc.)
+          - epoch counter (`self.epoch`)
+          - global step counters (`self.steps`)
+          - AMP `GradScaler` state
+        LR schedules, warmup counters, etc. all restart from zero.
+
+        For automatic resume-from-crash behavior use `_load_resuming_checkpoint`
+        instead (full restore). This function was previously named
+        `_load_resuming_checkpoint_restart` — the old name was misleading because
+        "restart" collided with "resume" in the same method set. Renamed as part
+        of Phase 1 Corrections C1 (see plan).
+        """
+        logging.info(f"Loading pretrained weights from {ckpt_path} (rank {self.rank})")
 
         with g_pathmgr.open(ckpt_path, "rb") as f:
             checkpoint = torch.load(f, map_location="cpu")
-        
-        # Load model state
+
+        # Load model state (and ONLY the model state).
         model_state_dict = checkpoint["model"] if "model" in checkpoint else checkpoint
         missing, unexpected = self.model.load_state_dict(
             model_state_dict, strict=self.checkpoint_conf.strict
         )
-        # if self.rank == 0:
-        #     logging.info(f"Model state loaded. Missing keys: {missing or 'None'}. Unexpected keys: {unexpected or 'None'}.")
-
-        # Load optimizer state if available and in training mode
-        # if "optimizer" in checkpoint:
-        #     logging.info(f"Loading optimizer state dict (rank {self.rank})")
-        #     self.optims[0].optimizer.load_state_dict(checkpoint["optimizer"])
-
-        # Load training progress prev_epoch
-        # if "epoch" in checkpoint:
-        # if "prev_epoch" in checkpoint:
-        #     self.epoch = checkpoint["prev_epoch"] + 1
-        #     logging.info(f"Loading epoch start (epoch: {self.epoch})")
-            
-        # self.steps = checkpoint["steps"] if "steps" in checkpoint else {"train": 0, "val": 0}
-        # self.ckpt_time_elapsed = checkpoint.get("time_elapsed", 0)
-
-        # Load AMP scaler state if available
-        # if self.optim_conf.amp.enabled and "scaler" in checkpoint:
-            # self.scaler.load_state_dict(checkpoint["scaler"])
+        # Intentional: DO NOT restore optimizer / epoch / steps / scaler here.
+        # If callers need that, they should wire up auto-resume from save_dir.
     
     def _load_resuming_checkpoint(self, ckpt_path: str):
         """Loads a checkpoint from the given path to resume training."""
@@ -997,16 +1004,30 @@ class Trainer:
             batch = self._apply_batch_repetition(batch)
         
         # Normalize camera extrinsics and points. The function returns new tensors.
-        normalized_extrinsics, normalized_cam_points, normalized_world_points, normalized_depths, normalized_bbox_corners = \
-        normalize_camera_extrinsics_and_points_boxes_batch(
-                extrinsics=batch["extrinsics"],
-                cam_points=batch["cam_points"],
-                world_points=batch["world_points"],
-                depths=batch["depths"],
-                point_masks=batch["point_masks"],
-                bbox_corners=batch["bbox_corners"],
-                scale_by_points=True #False
-            )
+        # Also normalizes QCOD scene-level GT (if present) with the same avg_scale,
+        # see train_utils/normalization.py :: normalize_camera_extrinsics_and_points_boxes_batch
+        # and plan D3 Step D for rationale.
+        (
+            normalized_extrinsics,
+            normalized_cam_points,
+            normalized_world_points,
+            normalized_depths,
+            normalized_bbox_corners,
+            normalized_qcod_scene_corners,
+            normalized_qcod_scene_scale,
+            normalized_qcod_scene_valid,
+        ) = normalize_camera_extrinsics_and_points_boxes_batch(
+            extrinsics=batch["extrinsics"],
+            cam_points=batch["cam_points"],
+            world_points=batch["world_points"],
+            depths=batch["depths"],
+            point_masks=batch["point_masks"],
+            bbox_corners=batch["bbox_corners"],
+            scale_by_points=True,  # False
+            qcod_scene_corners=batch.get("qcod_scene_corners"),
+            qcod_scene_scale=batch.get("qcod_scene_scale"),
+            qcod_scene_valid=batch.get("qcod_scene_valid"),
+        )
 
         # Replace the original values in the batch with the normalized ones.
         batch["extrinsics"] = normalized_extrinsics
@@ -1014,6 +1035,12 @@ class Trainer:
         batch["world_points"] = normalized_world_points
         batch["depths"] = normalized_depths
         batch["bbox_corners"] = normalized_bbox_corners
+        # QCOD scene GT (only written back if the dataset provided them;
+        # qcod_scene_R is NOT normalized — rotation matrices are scale-free).
+        if normalized_qcod_scene_corners is not None:
+            batch["qcod_scene_corners"] = normalized_qcod_scene_corners
+            batch["qcod_scene_scale"]   = normalized_qcod_scene_scale
+            batch["qcod_scene_valid"]   = normalized_qcod_scene_valid
 
         # save numpy file of batch["extrinsics"] and batch["bbox_corners"]
         # if self.rank == 0:  # Only save on rank 0 to avoid multiple saves
